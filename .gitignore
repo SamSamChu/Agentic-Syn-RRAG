@@ -1,0 +1,60 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments and local tooling
+.venv/
+venv/
+env/
+.conda/
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+
+# Logs, checkpoints, and temporary files
+*.log
+*.checkpoint.json
+tmp/
+tmp_data/
+tmp*.json
+*.tmp
+~$*
+
+# Generated experiment outputs
+evaluate/
+output/
+native/
+reaction_diagrams/
+mcp_tools/batch_results_self_refine_loop.jsonl
+
+# Large local data and model artifacts
+data/
+checkpoints/
+checkpoint-*/
+*.faiss
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.tar.gz
+
+# Third-party source trees
+RXNGraphormer/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Curated publication artifacts under examples/ are intentionally not ignored.
