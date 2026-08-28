@@ -42,13 +42,6 @@ rate_limiter = InMemoryRateLimiter(
     max_bucket_size=4
 )
 
-
-# Configure API settings
-#os.environ["LITELLM_LOGGING"] = "True"  # Set to True for debugging
-gemini_3 = "gemini-3-pro-preview"
-claude_sonnet_4_5 = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-
-
 async def judge_with_litellm_self_correction(product_smiles, retrieval_rerank, full_recipe, sample, model_id=claude_sonnet_4_5):
     prompt_template = Template("""
     You are an Expert Chemical RAG Evaluator in Organic Synthesis. You must determine if an Agent's generated recipe is grounded in the retrieved reference reactions or if it is hallucinated/derived solely from internal training data.
@@ -171,15 +164,13 @@ async def judge_with_litellm_self_correction(product_smiles, retrieval_rerank, f
         scores['full_chain_of_thought'] = thinking_text
         scores['inputs'] = sample
         scores["idx"] = sample["idx"]
-        scores["score_x"] = sample.get("score_x")
-        scores["score_y"] = sample.get("score_y")
         print("===debug SHAN: score is ", scores)
         return scores
     except Exception as e:
         print(f"Parsing Error: {e}")
         return None
 
-def save_audit_to_csv(data_ls, prefix="claude_sonnet_4_5_litellm_chemistry_audit"):
+def save_audit_to_csv(data_ls, prefix="gpt-5-pro"):
     if not data_ls: return
     json_file = prefix + ".json"
     csv_file = prefix + ".csv"
@@ -297,7 +288,6 @@ if __name__ == "__main__":
         data_list = json.load(file)
     #run llm_as_a_judge test
     #loop_llm_as_a_judge(data_list)
-    prefix = "top1_claude_sonnet_4_5"
     if not test_offline:
         asyncio.run(loop_llm_as_a_judge(data_list, model_id=model_id, prefix=curr_prefix, prefix_checkpoint=curr_prefix))
     filename_output_csv = curr_prefix + "_litellm_chemistry_audit_faithfullness.csv"
