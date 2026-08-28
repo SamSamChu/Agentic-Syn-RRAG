@@ -487,4 +487,6 @@ Citation metadata will be added with the accompanying manuscript. Until then, ci
 
 ## License
 
-This snapshot does not currently include a standalone `LICENSE` file. Do not assume redistribution or reuse terms; contact the repository maintainers for licensing information.
+This project is licensed under the [MIT License](./LICENSE).
+
+Copyright (c) 2026 SamSamChu.
