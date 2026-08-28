@@ -28,7 +28,6 @@ model_id = os.getenv("TEST_FAITHFULNESS_MODEL", "gpt-5-pro")
 _TEMPERATURE = float(os.getenv("TEST_FAITHFULNESS_TEMPERATURE", "1.0"))
 
 # Set this to 5-10 depending on your API tier (Free tier use 2-3)
-sem = asyncio.Semaphore(5)  
 litellm.set_verbose = os.getenv("LITELLM_LOGGING", "").lower() in ("1", "true", "yes")
 client = AsyncOpenAI(
     api_key=_API_KEY, # 填入api_key
@@ -42,7 +41,7 @@ rate_limiter = InMemoryRateLimiter(
     max_bucket_size=4
 )
 
-async def judge_with_litellm_self_correction(product_smiles, retrieval_rerank, full_recipe, sample, model_id=claude_sonnet_4_5):
+async def judge_with_litellm_self_correction(product_smiles, retrieval_rerank, full_recipe, sample, model_id="gpt-5-pro"):
     prompt_template = Template("""
     You are an Expert Chemical RAG Evaluator in Organic Synthesis. You must determine if an Agent's generated recipe is grounded in the retrieved reference reactions or if it is hallucinated/derived solely from internal training data.
 
