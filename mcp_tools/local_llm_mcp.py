@@ -27,7 +27,16 @@ def setup_model(MODEL_PATH:str):
 model, tokenizer = setup_model(args.model_path)
 
 @mcp.tool()
-async def generate_synthesis_results(prompts: list[str], max_tokens: int = 512, num_samples: int = 1, do_sample: bool = True, temperature: float = 0.3, top_p: float = 0.8, top_k: int = 20) -> list[str]:
+async def generate_synthesis_results(
+    prompts: list[str],
+    max_tokens: int = 512,
+    num_samples: int = 1,
+    do_sample: bool = True,
+    temperature: float = 0.3,
+    top_p: float = 0.8,
+    top_k: int = 20,
+    enable_diverse_sampling: bool = False,
+) -> list[str]:
     """
     Generates Reactants SMILE or reaction conditions include reagents and/or solvents SMILES strings using the local SFT model based on query condition.
     Use this for high-precision organic chemistry tasks.
@@ -47,23 +56,36 @@ async def generate_synthesis_results(prompts: list[str], max_tokens: int = 512, 
     inputs = tokenizer(text, padding=True,truncation=True,return_tensors = "pt").to(model.device)
     seq_len = len(inputs["input_ids"][0])
 
+    generation_kwargs = {
+        **inputs,
+        "num_return_sequences": num_samples,
+        "use_cache": True,
+        "max_new_tokens": max_tokens,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+    }
+    if enable_diverse_sampling:
+        generation_kwargs.update(
+            {
+                "do_sample": do_sample,
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+            }
+        )
+    else:
+        # Backward-compatible default: deterministic beam search, matching the
+        # previous hard-coded behavior.
+        generation_kwargs.update(
+            {
+                "do_sample": False,
+                "temperature": 0.0,
+                "num_beams": num_samples,
+            }
+        )
+
     with torch.no_grad():
-        outputs = model.generate(
-                **inputs,
-                # Recommended Qwen3 settings for non-reasoning
-                do_sample = False, #do_sample, #for multiple returns #num_return_sequences=num_samples, # top_5 generations
-                num_return_sequences=num_samples,
-                use_cache=True,
-                #for top1
-                temperature = 0.0,
-                #temperature = temperature, top_p = top_p , top_k = top_k,
-                num_beams=num_samples,
-                # for top5,
-                #temperature = 0.9, top_p = 0.95, top_k = 65, #for first test, temperature 0.7, top_p 0.8, top_k 20 for greedy1
-                max_new_tokens=max_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                )
+        outputs = model.generate(**generation_kwargs)
     
     decoded = tokenizer.batch_decode(outputs[:, seq_len:], skip_special_tokens=True)
     return decoded

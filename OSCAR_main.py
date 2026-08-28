@@ -52,6 +52,10 @@ class AgentState(TypedDict):
     products_SMILES: str
     products_IUPAC: str
     num_samples: int
+    condition_sampling: bool
+    condition_temperature: float
+    condition_top_p: float
+    condition_top_k: int
     scaffold_validation: bool
     validation_errors: Annotated[List[Dict], operator.add]
     # NEW: Store the multiple pathways from the Refiner
@@ -143,12 +147,23 @@ async def verify_and_refine_synthesis(
     tool_call_id: Annotated[str, InjectedToolCallId], # Mandatory for Command
     mcp_refiner,
     num_samples,
+    condition_sampling=False,
+    condition_temperature=0.3,
+    condition_top_p=0.8,
+    condition_top_k=20,
 ) -> Command:
     """Triggers self-refinement and forces a state update for 'pathways'."""
     # ... your existing extraction logic ...
     logger.info("DDEBUG, START PATHWAY LOCAL designer")
     product_smiles = state.get("products_SMILES")
-    result = await mcp_refiner.ainvoke({"product_smiles": product_smiles, "num_samples": num_samples})
+    result = await mcp_refiner.ainvoke({
+        "product_smiles": product_smiles,
+        "num_samples": num_samples,
+        "condition_sampling": condition_sampling,
+        "condition_temperature": condition_temperature,
+        "condition_top_p": condition_top_p,
+        "condition_top_k": condition_top_k,
+    })
     
     # ... your existing JSON parsing logic ...
     refined_list = json.loads(result[0]["text"])["refined_pathways"]
@@ -177,7 +192,15 @@ async def verify_and_refine_synthesis(
         }
     )
 
-async def smart_refine_node(state: AgentState,mcp_refiner,num_samples):
+async def smart_refine_node(
+    state: AgentState,
+    mcp_refiner,
+    num_samples,
+    condition_sampling=False,
+    condition_temperature=0.3,
+    condition_top_p=0.8,
+    condition_top_k=20,
+):
     """Validates SMILES and immediately executes refinement if safe."""
     try:
         # 1. Chemical Validation (The Gatekeeper)
@@ -203,7 +226,12 @@ async def smart_refine_node(state: AgentState,mcp_refiner,num_samples):
         result_command = await verify_and_refine_synthesis.coroutine(
             state=refine_state, 
             tool_call_id=f"refine_{uuid.uuid4().hex}",
-            mcp_refiner=mcp_refiner,num_samples=effective_n
+            mcp_refiner=mcp_refiner,
+            num_samples=effective_n,
+            condition_sampling=state.get("condition_sampling", condition_sampling),
+            condition_temperature=state.get("condition_temperature", condition_temperature),
+            condition_top_p=state.get("condition_top_p", condition_top_p),
+            condition_top_k=state.get("condition_top_k", condition_top_k),
         )
 
         # 4. Merge canonical SMILES into the final update
@@ -217,7 +245,18 @@ async def smart_refine_node(state: AgentState,mcp_refiner,num_samples):
         logger.exception("Unexpected error in smart_refine_node")
         return {"products_SMILES": None}
 
-def create_chemistry_app(mcp_retrieve, mcp_refiner, num_samples=1, simple_rag=False, generate_only=False,checkpointer=None):
+def create_chemistry_app(
+    mcp_retrieve,
+    mcp_refiner,
+    num_samples=1,
+    simple_rag=False,
+    generate_only=False,
+    checkpointer=None,
+    condition_sampling=False,
+    condition_temperature=0.3,
+    condition_top_p=0.8,
+    condition_top_k=20,
+):
     # --- Define node logic that uses the passed tools ---
     # --- Build the workflow ---
     workflow = StateGraph(AgentState)
@@ -229,7 +268,15 @@ def create_chemistry_app(mcp_retrieve, mcp_refiner, num_samples=1, simple_rag=Fa
         bound_pathway_node = partial(pathway_generate_only_node, mcp_retrieve=mcp_retrieve)
     else:
         bound_pathway_node = partial(pathway_pipeline_node, mcp_retrieve=mcp_retrieve)
-    bound_smart_refine_node = partial(smart_refine_node,mcp_refiner=mcp_refiner, num_samples=num_samples)
+    bound_smart_refine_node = partial(
+        smart_refine_node,
+        mcp_refiner=mcp_refiner,
+        num_samples=num_samples,
+        condition_sampling=condition_sampling,
+        condition_temperature=condition_temperature,
+        condition_top_p=condition_top_p,
+        condition_top_k=condition_top_k,
+    )
     workflow.add_node("smart_refine", bound_smart_refine_node)
     workflow.add_node("pathway_pipeline", bound_pathway_node)#pathway_pipeline_node)
     workflow.add_node("fallback_agent_node", fallback_agent_node)

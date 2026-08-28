@@ -51,6 +51,10 @@ class SynthesisState(TypedDict):
     is_valid: bool
     iterations: int
     num_samples: int
+    condition_sampling: bool
+    condition_temperature: float
+    condition_top_p: float
+    condition_top_k: int
     # This key will always hold the top 3 passed syntheses
     top_5_results: Annotated[List[dict], update_top_results]
 
@@ -58,16 +62,14 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:8000/v1")
 client = OpenAI(base_url=LLM_BASE_URL, api_key="token")
 
 
-# def _beam_schedule(num_samples: int) -> List[int]:
-#     """Run greedy plus milestone beam sizes up to the requested top-k."""
-#     requested = max(1, int(num_samples or 1))
-#     schedule = [beam for beam in (1, 3, 5, 10) if beam <= requested]
-#     if requested not in schedule:
-#         schedule.append(requested)
-#     return sorted(set(schedule))
-
 def _beam_schedule(num_samples: int) -> List[int]:
-    return [max(1, int(num_samples or 1))]
+    """Run greedy plus milestone beam sizes up to the requested top-k."""
+    requested = max(1, int(num_samples or 1))
+    schedule = [beam for beam in (1, 3, 5, 10) if beam <= requested]
+    if requested not in schedule:
+        schedule.append(requested)
+    return sorted(set(schedule))
+
 
 def _canonical_smiles(smiles: str) -> str | None:
     mol = Chem.MolFromSmiles((smiles or "").strip())
@@ -338,6 +340,10 @@ async def generate_conditions_fn(state: dict):
     reactant = state["reactant"]
     product = state["product"]
     metadata = state.get("metadata", {})
+    condition_sampling = bool(state.get("condition_sampling", False))
+    condition_temperature = float(state.get("condition_temperature", 0.3))
+    condition_top_p = float(state.get("condition_top_p", 0.8))
+    condition_top_k = int(state.get("condition_top_k", 20))
     
     # 1. Fetch the tools from the remote MCP server
     # This is fast because the model is already loaded on the server
@@ -355,8 +361,10 @@ async def generate_conditions_fn(state: dict):
     # if your server-side @mcp.tool supports them.
     prediction_result = await sft_tool.ainvoke({
         "prompts": [content],
-        "temperature": 0.3,
-        "top_p": 0.8
+        "temperature": condition_temperature,
+        "top_p": condition_top_p,
+        "top_k": condition_top_k,
+        "enable_diverse_sampling": condition_sampling,
     })
     
     # logger.debug("DEBUG current response is %s", prediction_result)
@@ -377,6 +385,10 @@ def continue_to_conditions(state: SynthesisState):
             "reactant": r["smiles"], 
             "product": state["product_smiles"],
             "metadata": r,
+            "condition_sampling": state.get("condition_sampling", False),
+            "condition_temperature": state.get("condition_temperature", 0.3),
+            "condition_top_p": state.get("condition_top_p", 0.8),
+            "condition_top_k": state.get("condition_top_k", 20),
         }) 
         for r in state["top_5_results"]
     ]

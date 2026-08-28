@@ -107,7 +107,14 @@ async def search_similar_reactions(reactants_smiles: str, products_smiles: str, 
     return json_str
 
 @mcp.tool()
-async def execute_synthesis_refinement(product_smiles: str, num_samples: int) -> dict:
+async def execute_synthesis_refinement(
+    product_smiles: str,
+    num_samples: int,
+    condition_sampling: bool = False,
+    condition_temperature: float = 0.3,
+    condition_top_p: float = 0.8,
+    condition_top_k: int = 20,
+) -> dict:
     """
     Exposes the self-refining synthesis loop as a tool.
     Accepts a molecule's SMILES string and returns refined pathways include reactants, reagents, solvents, verified also.
@@ -120,6 +127,10 @@ async def execute_synthesis_refinement(product_smiles: str, num_samples: int) ->
         "messages": [("user", "Refine this reaction")],
         "product_smiles": product_smiles,
         "num_samples": num_samples,
+        "condition_sampling": condition_sampling,
+        "condition_temperature": condition_temperature,
+        "condition_top_p": condition_top_p,
+        "condition_top_k": condition_top_k,
         "verified_results": []
     }
 

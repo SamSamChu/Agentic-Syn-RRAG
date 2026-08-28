@@ -1,69 +1,104 @@
-# Agentic SynR-RAG
+# Agentic-Syn-RRAG
 
-Agentic SynR-RAG is a retrieval-augmented framework for single-step retrosynthesis and executable synthesis-protocol generation. It combines a local SFT pathway model, reaction-graph retrieval, semantic reranking, and an external reasoning model in a Generate–Retrieve–Refine workflow.
+Agentic-Syn-RRAG is the release repository for **Syn-RRAG**, a retrieval-augmented framework for single-step retrosynthesis and synthesis-protocol generation. Given a target product SMILES, the system combines a locally served SFT model, RXNGraphormer/FAISS precedent retrieval, LLM reranking, and LLM-guided protocol refinement.
 
-> This repository contains research code. Generated routes and procedures must be reviewed by qualified chemists before experimental use.
+This repository contains the inference and evaluation runtime, a frozen 150-target benchmark, curated outputs, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
+
+> **Research-use warning**
+> Generated routes and procedures are model outputs, not experimentally validated instructions. They must be reviewed by qualified chemists before use.
+
+## Contents
+
+- [Overview](#overview)
+- [Repository structure](#repository-structure)
+- [Installation](#installation)
+- [Models and data](#models-and-data)
+- [SFT training](#sft-training)
+- [Configuration](#configuration)
+- [Quick start](#quick-start)
+- [Batch inference](#batch-inference)
+- [Benchmark and evaluation](#benchmark-and-evaluation)
+- [Baselines and ablations](#baselines-and-ablations)
+- [Reproducibility and limitations](#reproducibility-and-limitations)
+- [Citation](#citation)
 
 ## Overview
 
-Given a target product SMILES, SynR-RAG performs four stages:
+Syn-RRAG implements a **Generate–Retrieve–Refine** workflow:
 
-1. **Pathway generation** — a local SFT model proposes reactants, reagents, and solvents.
-2. **Structural retrieval** — RXNGraphormer embeddings and a FAISS index retrieve related patent reactions.
-3. **Semantic reranking** — an LLM reranks retrieved precedents by chemical and procedural relevance.
-4. **Protocol refinement** — a frontier model revises the pathway when warranted and produces a structured synthesis recipe.
+1. **Generate** — the local SFT model proposes candidate reactants and initial reagents/solvents.
+2. **Retrieve** — RXNGraphormer embeds each proposed reaction and FAISS returns ten structurally similar patent precedents.
+3. **Rerank** — the configured reranking model scores the retrieved precedents and retains the three most relevant records.
+4. **Refine** — the configured main model reviews the pathway and evidence, applies output validation, and writes a structured protocol.
 
-The repository supports the full SynR-RAG pipeline, a retrieval-free generation ablation, a direct native-LLM baseline, repeated target-molecule tests, and rule-based and LLM-based evaluation.
+The ten retrieved precedents in step 2 are distinct from the final Top-10 pathway candidates produced when `--num_samples 10` is used.
 
 <p align="center">
-  <img src="./images/SynR_RAG.jpg" alt="SynR-RAG architecture" width="720">
+  <img src="./images/Syn-RRAG.jpg" alt="Syn-RRAG architecture" width="760">
 </p>
 
-## Key features
+### Key features
 
-- End-to-end Generate–Retrieve–Refine synthesis planning
-- Hybrid structural retrieval and semantic reranking
-- Top-k pathway generation with canonicalization, verification, deduplication, and reranking
-- Batch inference with checkpoints and deterministic index-based sharding
-- Full RAG, simple-RAG, retrieval-free, and native-LLM comparison modes
-- Reactant accuracy, molecular validity, elemental consistency, structural compatibility, LLM-as-a-judge, and faithfulness evaluation
+The runtime supports:
 
-## Repository layout
+- full Syn-RRAG inference;
+- Top-k pathway generation with canonicalization, chemical checks, deduplication, and reranking;
+- product-only prediction and benchmark CSV input;
+- deterministic index-based sharding with resumable checkpoints;
+- retrieval-free, simple-RAG, and native-LLM comparisons;
+- rule-based reactant metrics, protocol judging, and faithfulness evaluation.
+
+## Repository structure
 
 ```text
 .
-├── run_app.py                         # Authoritative benchmark/batch runner
-├── predict_target_mols.py             # Product-only CSV inference
-├── OSCAR_main.py                      # LangGraph construction
+├── OSCAR_main.py                      # LangGraph workflow construction
+├── run_app.py                         # Benchmark, sharding, and ablation runner
+├── predict_target_mols.py             # Product-only Top-k inference
 ├── OSCAR_generate_only_native.py      # Direct native-LLM baseline
-├── nodes/                              # Generation, retrieval, reranking, refinement nodes
-├── mcp_tools/                          # Local SFT service and reaction-retrieval tools
-├── benchmark/                          # Rule-based and LLM-based evaluation scripts
-├── examples/                           # Curated, publication-facing result examples
-├── pretrained_classification_model/   # RXNGraphormer model assets
-├── data/                               # Reaction database and FAISS assets; prepared separately
-├── requirements_main.txt              # Main pipeline environment
-└── requirements_server.txt            # Local SFT service environment
+├── nodes/
+│   ├── rag_node.py                    # Retrieval, reranking, refinement, validation
+│   ├── rag_node_simple.py             # Retrieval without semantic reranking
+│   └── generate_only_node.py          # Retrieval-free refinement
+├── mcp_tools/
+│   ├── local_llm_mcp.py               # Local SFT model service
+│   ├── self_refine_loop_agent.py      # Candidate generation and verification
+│   ├── mcp_rag.py                     # Runtime retrieval/refinement MCP tool
+│   ├── database_embedding.py          # RXNGraphormer query embedding and search
+│   ├── save_load_embedding.py         # FAISS/database loading and persistence
+│   └── retrieval_sys.py               # Offline index-building utility
+├── utils/reaction_plausibility.py     # Element and scaffold checks
+├── benchmark/                         # Extraction and evaluation scripts
+├── evaluate/test_150.csv              # Frozen 150-target benchmark
+├── examples/                          # Curated, publication-facing outputs
+├── target_mols/target_mol.csv         # Three product-only example targets
+├── train_examples/                    # LLaMA-Factory patch and requirements
+├── pretrained_classification_model/   # RXNGraphormer model location
+├── requirements_main.txt              # Main runtime environment
+├── requirements_server.txt            # Local SFT service environment
+└── .env.example                       # Endpoint/model configuration template
 ```
+
+Large model weights, the reaction database, and its FAISS index are not included.
 
 ## Installation
 
-The main pipeline and local SFT service use separate environments.
+The main pipeline and the local SFT service use separate environments because their PyTorch and Transformers requirements differ. The commands below assume Bash; adapt activation and line-continuation syntax on other shells.
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/SamSamChu/Agentic-SynR-RAG.git
-cd Agentic-SynR-RAG
+git clone https://github.com/SamSamChu/Agentic-Syn-RRAG.git
+cd Agentic-Syn-RRAG
 ```
 
-### 2. Main pipeline environment
+### 2. Install the main runtime
 
 Python 3.10 is recommended.
 
 ```bash
-conda create -n agentic-synr-rag python=3.10 -y
-conda activate agentic-synr-rag
+conda create -n agentic-syn-rrag python=3.10 -y
+conda activate agentic-syn-rrag
 
 pip install -r requirements_main.txt \
   -f https://data.pyg.org/whl/torch-2.2.0+cpu.html \
@@ -73,19 +108,21 @@ git clone -b pytorch2 https://github.com/licheng-xu-echo/RXNGraphormer.git
 pip install ./RXNGraphormer
 ```
 
-### 3. Local SFT service environment
+### 3. Install the local SFT service
 
-Python 3.12 is recommended for the local generation service.
+Python 3.12 is recommended for the versions pinned in `requirements_server.txt`.
 
 ```bash
-conda create -n synr-sft-server python=3.12 -y
-conda activate synr-sft-server
+conda create -n syn-rrag-sft-server python=3.12 -y
+conda activate syn-rrag-sft-server
 pip install -r requirements_server.txt
 ```
 
-## Required assets
+The local checkpoint is loaded in bfloat16 with `device_map="auto"`; a compatible accelerator and sufficient memory are therefore expected for normal use.
 
-The full RXNGraphormer weights, database, index, benchmark CSV, and local SFT checkpoint are not bundled with this source tree. Arrange the runtime assets as follows:
+## Models and data
+
+Arrange the external runtime assets as follows:
 
 ```text
 Agentic-SynR-RAG/
@@ -97,137 +134,245 @@ Agentic-SynR-RAG/
 ├── checkpoints/
 │   └── <local-sft-checkpoint>/...
 └── evaluate/
-    └── agent_benchmark_162_clean.csv
+    └── test_150.csv                    # included
 ```
 
-The RXNGraphormer pretrained classification model is available from [Figshare](https://doi.org/10.6084/m9.figshare.28356077). Extract it into `pretrained_classification_model/`. Use a database, FAISS index, and index map produced as one matched set; an index generated from a different database ordering is invalid.
+The RXNGraphormer classification checkpoint is available from [Figshare](https://doi.org/10.6084/m9.figshare.28356077). Extract it into `pretrained_classification_model/`.
 
-The benchmark runner expects these CSV columns:
+The reaction database, FAISS index, and `indices_map_update.npy` must be generated from the same ordered dataset. Mixing an index or index map from a different database ordering produces invalid retrieval results. This snapshot does not specify a public download URL for that matched asset set; obtain it from the project release or build it from an authorized reaction corpus. `mcp_tools/retrieval_sys.py` contains the offline index-building path; review its input and output paths before running it.
 
-| Column | Meaning |
-| --- | --- |
-| `k`, `v` | Patent identifier/details |
-| `s_products` | Canonical product SMILES |
-| `s_reactants` | Reference reactant SMILES |
-| `s_reagents` | Reference reagent SMILES |
-| `s_solvents` | Reference solvent SMILES |
-| `clean_response` | A Python-literal-compatible parsed patent record |
+Place a Hugging Face-compatible SFT checkpoint under `checkpoints/`. It may be produced with the training procedure below or supplied separately by the project authors.
 
-For product-only prediction, `predict_target_mols.py` also accepts a headerless CSV whose first column contains product SMILES.
+## SFT training
+
+The SFT checkpoint is a prerequisite for the **Generate** stage. If you do not have a checkpoint distributed by the project authors, train and export one before proceeding to [Configuration](#configuration) and [Quick start](#quick-start).
+
+The training release is a patch against a fixed LLaMA-Factory revision, not a standalone trainer. All commands in this section start in `train_examples/`.
+
+### 1. Prepare LLaMA-Factory
+
+```bash
+cd /path/to/Agentic-SynR-RAG/train_examples
+git clone https://github.com/hiyouga/LlamaFactory.git
+cd LlamaFactory
+
+git fetch origin 2b27283ba0566eda9ec7ac335642807189c87e70
+git checkout 2b27283ba0566eda9ec7ac335642807189c87e70
+git apply --check ../my_changes.patch
+git apply ../my_changes.patch
+```
+
+The clone directory is `LlamaFactory`. The pinned commit is required because the patch modifies internal data loading, SFT workflow, and trainer files in addition to adding configs and evaluation utilities.
+
+### 2. Install training dependencies
+
+The supplied training requirements target Python 3.12 and CUDA 12.8:
+
+```bash
+conda create -n syn-rrag-train python=3.12 -y
+conda activate syn-rrag-train
+
+pip install .
+pip install -r ../requirements.txt \
+  --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+Verify the actual environment before launching a long run:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+### 3. Prepare model and datasets
+
+Set `model_name_or_path` in the patched YAML files to a local Llama-3-8B-Instruct-compatible checkpoint. The paths included in the patch are environment-specific examples and must be changed.
+
+The provided YAML files expect:
+
+```text
+LlamaFactory/
+├── wipo_data/
+│   ├── dataset_info.json
+│   ├── train.jsonl
+│   └── valid.jsonl
+└── data_uspto50/
+    ├── dataset_info.json
+    ├── train_50k_class.jsonl
+    └── valid_50k_class.jsonl
+```
+
+The patch adds dataset metadata templates under `data_wipo/` and `data_uspto50k/`. Copy or link the relevant template into the runtime dataset directory, or update `dataset_dir` in the YAML. Training and evaluation corpora are not bundled.
+
+### 4. Run training and SFT evaluation
+
+From the `LlamaFactory` root:
+
+```bash
+# WIPO multi-task training
+bash train_wipo.sh
+
+# USPTO-50K retrosynthesis/forward-prediction training
+bash train_uspto.sh
+
+# Patched WIPO and USPTO-50K evaluation instructions
+cd reaction_eval
+```
+
+Review `wipo_multi_task_full.yaml` and `uspto_50k_class.yaml` before running, especially model paths, dataset paths, output directories, precision, batch size, and distributed settings. The reference WIPO run is intended for a multi-GPU setup; memory and throughput depend on local hardware.
+
+After export, place the Hugging Face checkpoint under `checkpoints/<local-sft-checkpoint>/`. The inference sections below use this checkpoint through `mcp_tools/local_llm_mcp.py`.
 
 ## Configuration
 
-Copy the environment template and fill in credentials for the OpenAI/LiteLLM-compatible endpoints used in your deployment:
+Copy the template and replace placeholder credentials:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variables | Role |
-| --- | --- |
-| `SOTA_MODEL`, `SOTA_API_KEY`, `SOTA_BASE_URL`, `SOTA_TEMPERATURE` | Final pathway refinement and recipe generation |
-| `RERANK_MODEL`, `RERANK_API_KEY`, `RERANK_BASE_URL`, `RERANK_TEMPERATURE` | Semantic reranking |
-| `TEST_API_KEY`, `TEST_BASE_URL`, `TEST_JUDGE_MODEL_GPT` | GPT/Responses-API LLM judge |
-| `TEST_JUDGE_MODEL`, `TEST_JUDGE_TEMPERATURE` | Chat-Completions LLM judge |
-| `TEST_FAITHFULNESS_MODEL`, `TEST_FAITHFULNESS_TEMPERATURE` | Faithfulness judge |
-| `LLM_SERVER_URL` | Local SFT MCP endpoint; default `http://localhost:8000/mcp` |
-| `LLM_BASE_URL` | Optional OpenAI-compatible local-model endpoint; default `http://localhost:8000/v1` |
+| Variable | Used for | Default in code |
+| --- | --- | --- |
+| `SOTA_MODEL` | Final pathway review and protocol generation | `gemini-2.5-pro` |
+| `SOTA_API_KEY` | Main-model API credential | none |
+| `SOTA_BASE_URL` | OpenAI-compatible main-model endpoint | `https://www.litellm.org/` |
+| `SOTA_TEMPERATURE` | Main-model temperature | `1.0` |
+| `RERANK_MODEL` | Patent-precedent reranking | `gemini-2.5-flash` |
+| `RERANK_API_KEY` | Reranking-model credential | none |
+| `RERANK_BASE_URL` | OpenAI-compatible reranking endpoint | `https://www.litellm.org/` |
+| `RERANK_TEMPERATURE` | Reranking temperature | `1.0` |
+| `LLM_SERVER_URL` | Local SFT MCP endpoint | `http://localhost:8000/mcp` |
+| `TEST_API_KEY`, `TEST_BASE_URL` | Evaluation-model credential and endpoint | endpoint defaults to LiteLLM |
+| `TEST_JUDGE_MODEL_GPT` | Protocol judge | `gpt-5-pro` |
+| `TEST_FAITHFULNESS_MODEL` | Faithfulness judge | `gpt-5-pro` |
+| `TEST_FAITHFULNESS_TEMPERATURE` | Faithfulness-judge temperature | `1.0` in code |
+
+`LLM_BASE_URL` is retained in `self_refine_loop_agent.py` for an OpenAI-compatible local client, but the current generation path communicates through `LLM_SERVER_URL`. The native baseline is also a legacy path: it reads `SOTA_MODEL` and `SOTA_API_KEY` but currently uses a fixed LiteLLM gateway URL.
 
 Do not commit `.env` or API credentials.
 
-## Start the local pathway model
+## Quick start
 
-Start this service once in a dedicated terminal before running SynR-RAG:
+### 1. Start the local pathway service
+
+Run the service in a dedicated terminal:
 
 ```bash
 cd /path/to/Agentic-SynR-RAG
-conda activate synr-sft-server
+conda activate syn-rrag-sft-server
 
 python mcp_tools/local_llm_mcp.py \
   --model_path ./checkpoints/<local-sft-checkpoint>
 ```
 
-The service listens on port `8000`. The main process starts the reaction-retrieval MCP tool as a subprocess, so no separate retrieval-server command is required for `run_app.py`.
+The service listens on port `8000`. The inference entry points start `mcp_tools/mcp_rag.py` as a subprocess, so the retrieval tool does not require a second manually started service.
 
-## Batch Top-10 inference
+### 2. Predict synthesis plans from product SMILES
 
-`run_app.py` is the authoritative entry point for benchmark runs and ablations. The following production pattern splits the first 150 records into ten non-overlapping shards. Each shard uses its own output and checkpoint paths.
+The bundled input is a headerless CSV containing three targets:
 
 ```bash
-cd /path/to/Agentic-SynR-RAG
-conda activate agentic-synr-rag
+conda activate agentic-syn-rrag
 
-# Confirm that this checkout contains the intended embedding implementation.
-grep -n "RXN embedding temp root" mcp_tools/database_embedding.py
+python predict_target_mols.py \
+  -f target_mols/target_mol.csv \
+  --num_samples 10 \
+  -o target_mols/target_mol_top10_predictions.jsonl
+```
 
-RUN_DIR="./evaluate/$(date +%Y%m%d_%H%M%S)_gemini25_top10_10shards_policy"
+For a headered CSV, pass `--smiles_column <column>`. Without that option, the script recognizes common names including `smiles`, `target_smiles`, `product_smiles`, and `s_products`. Every input SMILES is validated and canonicalized with RDKit before inference.
+
+The output contains one pretty-printed JSON object per target. A checkpoint named `<output>.checkpoint.json` is maintained during execution and removed after all targets complete successfully. If a run is interrupted, rerunning the same command resumes from the checkpoint or existing output.
+
+Optional modes:
+
+```bash
+# SFT proposal + final generation, without retrieval or reranking
+python predict_target_mols.py -f target_mols/target_mol.csv --generate_only
+
+# Structural retrieval without semantic reranking
+python predict_target_mols.py -f target_mols/target_mol.csv --simple_rag
+```
+
+`--condition_sampling` affects only local SFT reagent/solvent generation. Reactant generation remains deterministic beam search. Its sampling controls are `--condition_temperature`, `--condition_top_p`, and `--condition_top_k`.
+
+## Batch inference
+
+`run_app.py` is the benchmark and ablation entry point. Its input CSV must contain `k`, `v`, `s_products`, `s_reactants`, `s_reagents`, `s_solvents`, and a Python-literal-compatible `clean_response` field. The included `evaluate/test_150.csv` has 150 rows and the required columns.
+
+A single-process run is:
+
+```bash
+python run_app.py \
+  -f ./evaluate/test_150.csv \
+  -s ./evaluate/syn_rrag_top10/model \
+  -p ./evaluate/syn_rrag_top10/run \
+  --num_samples 10 \
+  --max_concurrency 1
+```
+
+For ten deterministic, non-overlapping shards:
+
+```bash
+RUN_ID="$(date +%Y%m%d_%H%M%S)_syn_rrag_top10"
+RUN_DIR="./evaluate/${RUN_ID}"
+OUTPUT_STEM="01_gemini25_top10"
 mkdir -p "$RUN_DIR"
-echo "$RUN_DIR" | tee "$RUN_DIR/RUN_DIR.txt"
+printf '%s\n' "$OUTPUT_STEM" > "$RUN_DIR/OUTPUT_STEM.txt"
 
 for sid in $(seq 0 9); do
-  mkdir -p "$RUN_DIR/shard_${sid}"
+  SHARD_DIR="$RUN_DIR/shard_${sid}"
+  mkdir -p "$SHARD_DIR"
   nohup python run_app.py \
-    -f "./evaluate/agent_benchmark_162_clean.csv" \
-    -s "$RUN_DIR/shard_${sid}/01_gemini25_top10_model" \
-    -p "$RUN_DIR/shard_${sid}/01_gemini25_top10_" \
+    -f ./evaluate/test_150.csv \
+    -s "$SHARD_DIR/${OUTPUT_STEM}_model" \
+    -p "$SHARD_DIR/${OUTPUT_STEM}_" \
     --num_samples 10 \
     --shard_id "$sid" \
     --num_shards 10 \
     --total_records 150 \
     --max_concurrency 1 \
-    >> "$RUN_DIR/shard_${sid}/01_gemini25_top10.log" 2>&1 &
+    > "$SHARD_DIR/${OUTPUT_STEM}.log" 2>&1 &
 done
-
-echo "started 10 shards -> $RUN_DIR"
-jobs -l
 ```
 
-Before starting a replacement run, inspect old jobs with `pgrep -af 'python.*run_app.py'` and terminate only the confirmed stale process IDs. Never let two jobs write to the same output prefix.
+Do not allow two processes to write to the same output prefix. Each shard writes:
 
-Each shard produces:
+- `${OUTPUT_STEM}_model.pkl`: a stream of pickled records;
+- `${OUTPUT_STEM}_model.json`: pretty-printed, concatenated JSON objects, not a JSON array;
+- `${OUTPUT_STEM}__checkpoint.json`: resumable progress, removed after that shard completes;
+- `${OUTPUT_STEM}.log`: redirected process output from the command above.
 
-- `01_gemini25_top10_model.pkl`: a stream of pickled records
-- `01_gemini25_top10_model.json`: concatenated indented JSON objects
-- `01_gemini25_top10__checkpoint.json`: resumable progress, removed after successful completion
-- `01_gemini25_top10.log`: redirected process log
+## Benchmark and evaluation
 
-The `.json` output is concatenated JSON, not one JSON array. Repository evaluation utilities parse this format directly.
+### Reported benchmark
 
-## Results and qualitative examples
+The accompanying manuscript evaluates the full pipeline on 150 targets sampled from the product-disjoint WIPO-2M held-out test set. The release snapshot includes this frozen subset at [`evaluate/test_150.csv`](./evaluate/test_150.csv).
 
-The README is part of the material examined by paper reviewers, but it should provide a compact, auditable result view rather than duplicate every raw run file. Put publication-facing artifacts under [`examples/`](./examples/) and use the following separation:
-
-| Artifact | README role | Recommendation |
+| Track | Evaluation setting | Reported result |
 | --- | --- | --- |
-| `gemini25_top10_display.json` | Main SynR-RAG qualitative output | **Required.** Link the complete curated file and show one compact example in the README. |
-| `native_top1_display.json` | Direct native-LLM comparison | **Recommended.** Use the same target molecules/record IDs as the main display. |
-| `generate_only_top1_display.json` | Retrieval-free ablation output | Optional as a raw display file. The quantitative generate-only ablation result should still appear in the benchmark summary. |
+| Standalone SFT backbone | WIPO-2M held-out test (~10k products) | Top-1/3/5/10: 44.5% / 65.1% / 70.8% / 75.9% |
+| Full Syn-RRAG | 150 targets, Top-1 | Reactant accuracy: **48.0%** |
+| SFT Llama | Same 150 targets | Reactant accuracy: 46.0% |
+| Native Gemini-2.5-Pro | Same 150 targets | Reactant accuracy: 14.7% |
+| Full Syn-RRAG rule checks | Same 150 targets, Top-1 | Validity: 100.0%; elemental consistency: 100.0%; structural compatibility: 99.3% |
 
-The main display should retain enough information to audit the pipeline:
+These values are reported results, not recomputed during installation. Use the commands below to evaluate a completed run.
 
-- record ID and target product SMILES;
-- ranked SFT Llama pathways;
-- retrieved/reranked precedent summaries and citations;
-- final SynR-RAG recipes;
-- pathway identifiers and validation status.
+### Metric definitions
 
-Remove internal traces, duplicate payloads, API metadata, chain-of-thought, and secrets. If examples are manually selected, state the selection rule and record IDs; otherwise reviewers may reasonably interpret them as cherry-picked. Native and generate-only comparisons must use exactly the same frozen targets as the main display.
+| Metric | Implementation in this repository |
+| --- | --- |
+| Reactant accuracy | After RDKit canonicalization, every reference reactant component must appear in the pooled predicted reactants and reagents. The fields are pooled because a model may classify a true reactant as a reagent. |
+| Molecular validity | Every predicted molecular component must parse and canonicalize with RDKit. |
+| Elemental consistency | Every element type in the target product must occur in the predicted reactant/reagent pool; this is presence-only, not atom-count balancing. |
+| Structural compatibility | Each substantial reactant fragment must satisfy the connected-MCS scaffold policy in `utils/reaction_plausibility.py`. |
+| Full-protocol plausibility | An independent judge scores temperature/time, stoichiometry, solvent choice, and operational practicality from 0 to 10. |
 
-For the README itself, show:
+In evaluation output, `local` denotes the SFT proposal, `agent` denotes Syn-RRAG, and `agent+alt` includes eligible alternative reactants. The latter is used only where the recorded reactant-revision policy allows it.
 
-1. one concise side-by-side qualitative case (SFT Llama, Native LLM, Generate-only, and SynR-RAG where available);
-2. the final benchmark table for the full test set;
-3. links to the complete curated JSON artifacts.
+### Interpreting Top-k
 
-Do not paste full Native or Generate-only JSON into the README. Native is most useful as a matched qualitative control, while Generate-only is primarily an ablation and can be represented by its aggregate metrics plus an optional JSON link.
-
-For a side-by-side case, compare rank 1 from every method. The remaining SynR-RAG Top-10 candidates may be shown separately to illustrate ranking and coverage, but they must not be presented as if Native or Generate-only had been evaluated at the same Top-10 setting unless those methods were actually run that way.
-
-This repository ignores general run JSON files. Curated files placed directly under `examples/` are explicitly allowed by `.gitignore`.
-
-### What “Top-10” means in the current implementation
-
-The current local pathway generator does **not** make one native `num_beams=10` call. It uses this schedule:
+The local generator pools results from milestone beam widths:
 
 | Requested k | Beam-search calls |
 | --- | --- |
@@ -236,248 +381,110 @@ The current local pathway generator does **not** make one native `num_beams=10` 
 | 5 | `[1, 3, 5]` |
 | 10 | `[1, 3, 5, 10]` |
 
-Candidates from all calls are canonicalized, chemically checked, pooled, deduplicated, reranked, and then truncated to the requested k. Consequently:
+Candidates are canonicalized, checked, pooled, deduplicated, sorted, and truncated to the requested k. Therefore, Top-1/3/5 metrics from a completed Top-10 run use prefixes of the final pooled ranking. They need not equal results from independent `--num_samples 1`, `3`, or `5` runs.
 
-- Top-1/3/5 taken from a Top-10 run are prefixes of the **pooled Top-10 ranking**.
-- They are not necessarily identical to separately generated native beam-1/3/5 results.
-- To compare independent generation settings, run `--num_samples 1`, `3`, `5`, and `10` separately.
+### Extract Top-1 and compute rule-based metrics
 
-## Repeated target-molecule stability test
-
-Prepare a CSV containing the frozen target set:
-
-```csv
-smiles
-CC1=CC=C(C)C(NC(C2=NC(C=CC=C3)=C3C=C2)=O)=C1
-CC1=CC=CC(C2=NC(C=CC=C3)=C3C(N2)=O)=C1
-CNC([C@H](CC1=CNC2=C1C=CC=C2)NC(NC3=CC=CC(Cl)=C3)=O)=O
-O=C(N(CC1)CCC1C2=CNC3=CC=CC=C32)C4=CN=C(C=CC=C5)C5=C4
-```
-
-Save it as `target_mols/stability_targets.csv`, then run three independent Top-10 predictions. The local SFT service described above must already be running.
+Set `RUN_DIR` to a completed sharded run and reuse its output stem:
 
 ```bash
-cd /path/to/Agentic-SynR-RAG
-mkdir -p ./output/stability
+OUTPUT_STEM="${OUTPUT_STEM:-01_gemini25_top10}"
+SHARD_PATTERN="shard_*/${OUTPUT_STEM}_model.json"
 
-for r in 1 2 3; do
-  python predict_target_mols.py \
-    --input_csv ./target_mols/stability_targets.csv \
-    --output_jsonl "./output/stability/gemini25_top10_rep${r}.jsonl" \
-    --checkpoint_file "./output/stability/gemini25_top10_rep${r}.checkpoint.json" \
-    --num_samples 10 \
-    2>&1 | tee "./output/stability/gemini25_top10_rep${r}.log"
-done
-```
+python benchmark/extract_top1_from_top10.py \
+  --input_dir "$RUN_DIR" \
+  --pattern "$SHARD_PATTERN"
 
-Use a new output and checkpoint filename for each replicate. The local SFT stage is deterministic beam search, while external reranking and refinement endpoints may still vary between runs.
-
-## Extract Top-1 from a completed Top-10 run
-
-The following script merges ten concatenated-JSON shards by `idx`, keeps rank 1, truncates aligned pathway fields, and writes both JSON and pickle outputs. This produces rank 1 from the pooled Top-10 run; it does not recreate an independent `--num_samples 1` run.
-
-```bash
-SRC="evaluate/20260811_110143_gemini25_top10_10shards_policy"
-OUT="evaluate/policy_top1_from_top10_0811_110143"
-mkdir -p "$OUT"
-export SRC OUT
-
-python - <<'PY'
-import glob
-import json
-import os
-import pickle
-
-src = os.environ["SRC"]
-out = os.environ["OUT"]
-out_json = os.path.join(out, "gemini25_top1_from_top10.json")
-out_pkl = os.path.join(out, "gemini25_top1_from_top10.pkl")
-
-def parse_concat(path):
-    text = open(path, encoding="utf-8").read()
-    decoder, pos, records = json.JSONDecoder(), 0, []
-    while pos < len(text):
-        while pos < len(text) and text[pos].isspace():
-            pos += 1
-        if pos >= len(text):
-            break
-        obj, pos = decoder.raw_decode(text, pos)
-        records.append(obj)
-    return records
-
-by_idx = {}
-pattern = os.path.join(src, "shard_*", "01_gemini25_top10_model.json")
-for path in sorted(glob.glob(pattern)):
-    for record in parse_concat(path):
-        idx = record.get("idx")
-        if not isinstance(idx, int):
-            continue
-        for key in ("full_recipe", "pathways"):
-            value = record.get(key)
-            if isinstance(value, list):
-                record[key] = value[:1]
-        for key in (
-            "final_reports", "pathway_id", "top5_retrieval", "retrieval_first",
-            "top3_rerank_extract", "top3_rerank_retrieval", "history",
-        ):
-            value = record.get(key)
-            if isinstance(value, list) and len(value) > 1:
-                record[key] = value[:1]
-        by_idx[idx] = record
-
-records = [by_idx[idx] for idx in sorted(by_idx)]
-if records:
-    print("records:", len(records), "idx:", records[0]["idx"], "-", records[-1]["idx"])
-else:
-    raise RuntimeError(f"No records found under {src}")
-
-with open(out_json, "w", encoding="utf-8") as handle:
-    for record in records:
-        json.dump(record, handle, ensure_ascii=False, indent=4)
-        handle.write("\n")
-
-with open(out_pkl, "wb") as handle:
-    for record in records:
-        pickle.dump(record, handle)
-
-print("wrote", out_json, out_pkl)
-PY
-```
-
-For a smaller standard JSON array that retains all recipes, use:
-
-```bash
-python benchmark/slim_run_outputs.py \
-  --input_dir "$SRC" \
-  --output "$SRC/slim_all.json"
-```
-
-## Evaluation
-
-### Rule-based Top-k metrics
-
-```bash
+mkdir -p "$RUN_DIR/metrics"
 python benchmark/evaluate_reactant_metrics.py \
-  --input_dir ./evaluate/20260811_110143_gemini25_top10_10shards_policy \
-  --output_prefix ./evaluate/20260811_110143_gemini25_top10_10shards_policy/reactant_metrics
+  --input_dir "$RUN_DIR" \
+  --pattern "$SHARD_PATTERN" \
+  --output_prefix "$RUN_DIR/metrics/reactant"
 ```
 
-The report calculates Top-1, Top-3, Top-5, and Top-10 results for:
+Top-1 files are written to `RUN_DIR/derived/top1_from_top10/`. Metric outputs are `<prefix>_summary.json` and `<prefix>_per_record.csv`.
 
-- **Reactant accuracy**
-- **Molecular validity**
-- **Elemental consistency**
-- **Structural compatibility**
-
-The script’s output labels map to the paper terminology as follows: `local` = **SFT Llama**, `agent` = **Syn-RRAG**, and `agent+alt` = **Syn-RRAG with eligible alternative reactants**. Top-k is computed over prefixes of the final ranked output, not by rerunning the generator at each k.
-
-### LLM-as-a-judge for extracted Top-1
+### Protocol judge and faithfulness
 
 ```bash
-mkdir -p ./benchmark/policy_top1_from_top10_0811_110143
+TOP1_FILE="$RUN_DIR/derived/top1_from_top10/top1_from_top10.json"
+JUDGE_DIR="./benchmark/${RUN_ID}/top1_from_top10"
+JUDGE_PREFIX="$JUDGE_DIR/syn_rrag_top1_"
+mkdir -p "$JUDGE_DIR"
 
 python benchmark/prepare_llm_judge_dataset.py \
-  --input_file ./evaluate/policy_top1_from_top10_0811_110143/gemini25_top1_from_top10.json \
-  --prefix ./benchmark/policy_top1_from_top10_0811_110143/gemini25_agentic_top1_
+  --input_file "$TOP1_FILE" \
+  --prefix "$JUDGE_PREFIX"
 
 python benchmark/test_API_with_self_correction_gpt.py \
-  --input_file ./benchmark/policy_top1_from_top10_0811_110143/gemini25_agentic_top1_llm_judge_eval_results.json \
-  --prefix ./benchmark/policy_top1_from_top10_0811_110143/gemini25_agentic_top1_
-```
+  --input_file "${JUDGE_PREFIX}llm_judge_eval_results.json" \
+  --prefix "$JUDGE_PREFIX"
 
-### Faithfulness
-
-```bash
 python benchmark/test_API_with_faithfulness_score.py \
-  --input_file ./benchmark/policy_top1_from_top10_0811_110143/gemini25_agentic_top1_llm_judge_eval_results.json \
-  --prefix ./benchmark/policy_top1_from_top10_0811_110143/gemini25_faithfulness_top1_
+  --input_file "${JUDGE_PREFIX}llm_judge_eval_results.json" \
+  --prefix "$JUDGE_DIR/syn_rrag_faithfulness_top1_"
 ```
 
-Use `--test_offline` with the faithfulness script only when the corresponding audit CSV already exists and you want to recompute its summary without new API calls.
+Use `--test_offline` with the faithfulness script only when its audit CSV already exists and only the summary should be recomputed.
+
+### Curated outputs
+
+The release includes redacted, publication-facing examples:
+
+| File | Contents |
+| --- | --- |
+| [`examples/gemini25_top10_display.json`](./examples/gemini25_top10_display.json) | Full Syn-RRAG pathways, retrieved/reranked evidence, and final recipes |
+| [`examples/native_top1_display.csv`](./examples/native_top1_display.csv) | Native-LLM Top-1 records; despite the extension, this is concatenated JSON content |
+| [`examples/generate_only_top1_display.json`](./examples/generate_only_top1_display.json) | Retrieval-free Top-1 outputs |
+
+The files contain the same 150 targets in the same `idx` order, but their fields differ by experimental setting. API metadata, hidden reasoning, and credentials are excluded.
 
 ## Baselines and ablations
 
-### Native LLM baseline
+### Native LLM
 
-This baseline asks the configured main model to generate a complete recipe directly, without the local SFT pathway generator or retrieval pipeline.
+This path asks the configured main model for a complete protocol without the local SFT generator or retrieval:
 
 ```bash
-mkdir -p ./native ./benchmark/native_gemini25_top1_0809
-
 python OSCAR_generate_only_native.py \
-  -f ./evaluate/agent_benchmark_162_clean.csv \
-  -s ./native/gemini25_mode_top1_0809 \
-  -p ./native/gemini25_top1_0809
-
-python benchmark/prepare_llm_judge_dataset.py \
-  --input_file ./native/gemini25_mode_top1_0809.csv \
-  --prefix ./benchmark/native_gemini25_top1_0809/gemini25_native_top1_
-
-python benchmark/test_API_with_self_correction_gpt.py \
-  --input_file ./benchmark/native_gemini25_top1_0809/gemini25_native_top1_llm_judge_eval_results.json \
-  --prefix ./benchmark/native_gemini25_top1_0809/gemini25_native_top1_
+  -f ./evaluate/test_150.csv \
+  -s ./native/gemini25_top1/model \
+  -p ./native/gemini25_top1/run
 ```
 
-`OSCAR_generate_only_native.py` historically writes concatenated JSON records using a `.csv` filename; the preparation utility handles the content as records despite that extension.
-The current native runner reads `SOTA_MODEL` and `SOTA_API_KEY` but uses `https://www.litellm.org/` as its fixed gateway URL.
+The runner writes concatenated JSON records to a `.csv`-named file and a pickle stream. `prepare_llm_judge_dataset.py` handles this legacy format.
 
-### Generate-only ablation
+### Syn-w/o-RRAG
 
-This mode retains the local SFT pathway proposal and final generation but removes retrieval and semantic reranking.
+This ablation retains SFT pathway proposal and final protocol generation but removes precedent retrieval and semantic reranking:
 
 ```bash
 python run_app.py \
-  -f ./evaluate/agent_benchmark_162_clean.csv \
-  -s ./evaluate/generate_only/gemini25_top1_0810 \
-  -p ./evaluate/generate_only/gemini25_top1_0810 \
+  -f ./evaluate/test_150.csv \
+  -s ./evaluate/generate_only_top1/model \
+  -p ./evaluate/generate_only_top1/run \
   --generate_only \
   --num_samples 1
-
-mkdir -p ./benchmark/generate_only
-
-python benchmark/prepare_llm_judge_dataset.py \
-  --input_file ./evaluate/generate_only/gemini25_top1_0810.json \
-  --prefix ./benchmark/generate_only/gemini25_top1_0810_
-
-python benchmark/test_API_with_self_correction_gpt.py \
-  --input_file ./benchmark/generate_only/gemini25_top1_0810_llm_judge_eval_results.json \
-  --prefix ./benchmark/generate_only/judge
 ```
 
-For the structural-retrieval-only ablation, replace `--generate_only` with `--simple_rag`.
+### Simple RAG
 
-## Product-only prediction
+`--simple_rag` uses the structural retrieval results directly and omits semantic reranking. It is a code-supported diagnostic mode rather than the full Syn-RRAG setting.
 
-Use `predict_target_mols.py` when ground-truth patent fields are unavailable:
+## Reproducibility and limitations
 
-```bash
-python predict_target_mols.py \
-  --input_csv ./target_mols/target_mol.csv \
-  --output_jsonl ./target_mols/target_mol_top10_predictions.jsonl \
-  --num_samples 10
-```
-
-Use `--smiles_column <column>` for a headered CSV, or omit it for a headerless file whose first column contains product SMILES.
-
-## Reproducibility notes
-
-- The local SFT service uses deterministic beam search (`do_sample=False`). Therefore caller-supplied `temperature`, `top_p`, and `top_k` values are ignored; differences between Top-1/3/5/10 come from beam width and candidate pooling, not sampling randomness.
-- No global random seed is set by the repository. GPU kernels and external model endpoints may still introduce variation.
-- The GPT Responses-API judge intentionally does not send a temperature because reasoning models such as GPT-5 Pro may reject or ignore it.
-- Record the code revision, `.env` model identifiers, endpoint/provider versions, asset versions, run directory, and logs for every reported experiment.
-- For judge stability, evaluate the same frozen prepared dataset multiple times and report the aggregation procedure; do not compare scores from differently prepared inputs.
-
-## Execution entry points and current limitations
-
-- Use `run_app.py` for benchmark CSVs, sharding, and paper ablations.
-- Use `predict_target_mols.py` for product-only inference; it replaces the legacy single-molecule port runner and supports full RAG, simple RAG, and generate-only modes.
-- Both entry points start `mcp_tools/mcp_rag.py` internally, but the local SFT service on port 8000 must already be running.
-- Failed validation pathways may be excluded from `full_recipe`. Inspect `validation_errors` and pathway identifiers rather than assuming all output lists remain positionally aligned after filtering.
+- Reactant generation defaults to deterministic beam search (`do_sample=False`); condition sampling is opt-in and does not change that behavior.
+- No repository-wide random seed is set. GPU kernels and external model providers may still introduce variation.
+- The main benchmark runner processes records sequentially inside each shard; `--max_concurrency` configures LangGraph work within a record.
+- External model IDs and provider implementations can change. Record the code revision, endpoint/provider version, model IDs, asset versions, run directory, and logs.
+- Failed or warned validation paths are recorded in `validation_errors`. Inspect pathway IDs instead of assuming every result list is positionally aligned after filtering.
+- The rule-based checks are screening heuristics, not reaction simulation or experimental validation.
+- Judge scores depend on the prepared dataset and judge endpoint. Compare only runs evaluated from the same frozen inputs and report repeated-run aggregation where applicable.
 
 ## Citation
 
-Citation information will be added with the accompanying manuscript. If this repository contributes to published work, please cite the released paper and this software repository.
+Citation metadata will be added with the accompanying manuscript. Until then, cite both the manuscript and this repository when using the released code, benchmark, or examples.
 
 ## License
 
-This project is released under the [Apache License 2.0](./LICENSE).
+This snapshot does not currently include a standalone `LICENSE` file. Do not assume redistribution or reuse terms; contact the repository maintainers for licensing information.

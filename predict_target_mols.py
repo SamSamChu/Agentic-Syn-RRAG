@@ -220,6 +220,10 @@ async def predict_targets(
     simple_rag: bool,
     generate_only: bool,
     scaffold_validation: bool,
+    condition_sampling: bool,
+    condition_temperature: float,
+    condition_top_p: float,
+    condition_top_k: int,
     max_concurrency: int,
     checkpoint_file: Path,
 ) -> None:
@@ -261,6 +265,10 @@ async def predict_targets(
                 num_samples=num_samples,
                 simple_rag=simple_rag,
                 generate_only=generate_only,
+                condition_sampling=condition_sampling,
+                condition_temperature=condition_temperature,
+                condition_top_p=condition_top_p,
+                condition_top_k=condition_top_k,
             )
 
             for position, input_record in enumerate(targets.to_dict("records"), start=1):
@@ -273,6 +281,10 @@ async def predict_targets(
                     "products_SMILES": product_smiles,
                     "num_samples": num_samples,
                     "scaffold_validation": scaffold_validation,
+                    "condition_sampling": condition_sampling,
+                    "condition_temperature": condition_temperature,
+                    "condition_top_p": condition_top_p,
+                    "condition_top_k": condition_top_k,
                 }
 
                 async for attempt in AsyncRetrying(
@@ -346,6 +358,37 @@ def main() -> None:
         default=True,
         help="Enable/disable scaffold validation in final recipe generation.",
     )
+    parser.add_argument(
+        "--condition_sampling",
+        "--condition-sampling",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable sampling only for local SFT reagent/solvent condition generation. "
+            "Default keeps the previous deterministic beam-search behavior."
+        ),
+    )
+    parser.add_argument(
+        "--condition_temperature",
+        "--condition-temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature for local SFT reagent/solvent generation when --condition_sampling is enabled.",
+    )
+    parser.add_argument(
+        "--condition_top_p",
+        "--condition-top-p",
+        type=float,
+        default=0.9,
+        help="top_p for local SFT reagent/solvent generation when --condition_sampling is enabled.",
+    )
+    parser.add_argument(
+        "--condition_top_k",
+        "--condition-top-k",
+        type=int,
+        default=50,
+        help="top_k for local SFT reagent/solvent generation when --condition_sampling is enabled.",
+    )
     parser.add_argument("--max_concurrency", type=int, default=8)
     parser.add_argument("--checkpoint_file", default=None)
     args = parser.parse_args()
@@ -372,6 +415,10 @@ def main() -> None:
             simple_rag=args.simple_rag,
             generate_only=args.generate_only,
             scaffold_validation=args.scaffold_validation,
+            condition_sampling=args.condition_sampling,
+            condition_temperature=args.condition_temperature,
+            condition_top_p=args.condition_top_p,
+            condition_top_k=args.condition_top_k,
             max_concurrency=args.max_concurrency,
             checkpoint_file=checkpoint_file,
         )

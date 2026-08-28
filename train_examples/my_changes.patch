@@ -1,0 +1,1402 @@
+diff --git a/data/dataset_info.json b/data/dataset_info.json
+index 855c35d9..21b7529c 100644
+--- a/data/dataset_info.json
++++ b/data/dataset_info.json
+@@ -1,4 +1,35 @@
+-{
++{ "chem_react_qa": {
++    "file_name": "mapped_train_dataset.jsonl",
++    "formatting": "sharegpt",
++    "columns": {
++	    "messages":"messages"
++    },
++    "tags":{
++	    "role_tag": "role",
++	    "content_tag": "content",
++	    "user_tag": "user",
++	    "assistant_tag": "assistant",
++	    "system_tag": "system"
++
++    },
++    "data_path": "/inspire/ssd/project/sais-suiren-foundation-model-prediction/public/shan/llamaF/my_experiments"
++  },
++  "chem_react_qa_val": {
++    "file_name": "mapped_valid_dataset.jsonl",
++    "formatting": "sharegpt",
++    "columns": {
++            "messages":"messages"
++    },
++    "tags":{
++            "role_tag": "role",
++            "content_tag": "content",
++            "user_tag": "user",
++            "assistant_tag": "assistant",
++            "system_tag": "system"
++
++    },
++    "data_path": "/inspire/ssd/project/sais-suiren-foundation-model-prediction/public/shan/llamaF/my_experiments"
++  },
+   "identity": {
+     "file_name": "identity.json"
+   },
+diff --git a/data_uspto50k/dataset_info.json b/data_uspto50k/dataset_info.json
+new file mode 100644
+index 00000000..43ebcb00
+--- /dev/null
++++ b/data_uspto50k/dataset_info.json
+@@ -0,0 +1,16 @@
++{
++  "chem_react_qa_uspto50k_class": {
++    "file_name": "train_50k_class.jsonl",
++    "columns": {
++            "prompt": "instruction",
++            "response": "output"
++    }
++  },
++  "chem_react_qa_uspto50k_class": {
++    "file_name": "valid_50k_class.jsonl",
++    "columns": {
++            "prompt": "instruction",
++            "response": "output"
++    }
++  }
++}
+diff --git a/data_wipo/dataset_info.json b/data_wipo/dataset_info.json
+new file mode 100644
+index 00000000..64cc518b
+--- /dev/null
++++ b/data_wipo/dataset_info.json
+@@ -0,0 +1,16 @@
++{
++  "chem_react_qa": {
++    "file_name": "train.jsonl",
++    "columns": {
++            "prompt": "instruction",
++            "response": "output"
++    }
++  },
++  "chem_react_qa_val": {
++    "file_name": "valid.jsonl",
++    "columns": {
++            "prompt": "instruction",
++            "response": "output"
++    }
++  }
++}
+diff --git a/examples/train_full/llama3_full_sft.yaml b/examples/train_full/llama3_full_sft_origin.yaml
+similarity index 100%
+rename from examples/train_full/llama3_full_sft.yaml
+rename to examples/train_full/llama3_full_sft_origin.yaml
+diff --git a/examples/train_lora/llama3_lora_sft.yaml b/examples/train_lora/llama3_lora_sft.yaml
+index 157d6610..c600dbf3 100644
+--- a/examples/train_lora/llama3_lora_sft.yaml
++++ b/examples/train_lora/llama3_lora_sft.yaml
+@@ -6,30 +6,30 @@ trust_remote_code: true
+ stage: sft
+ do_train: true
+ finetuning_type: lora
+-lora_rank: 8
++lora_rank: 64
+ lora_target: all
+ 
+ ### dataset
+ dataset: identity,alpaca_en_demo
+ template: llama3
+-cutoff_len: 2048
+-max_samples: 1000
++cutoff_len: 4096
++max_samples: 100000000
+ overwrite_cache: true
+ preprocessing_num_workers: 16
+ dataloader_num_workers: 4
+ 
+ ### output
+-output_dir: saves/llama3-8b/lora/sft
++output_dir: saves/llama3-8b/lora/sft-distill-condition
+ logging_steps: 10
+-save_steps: 500
++save_steps: 800
+ plot_loss: true
+ overwrite_output_dir: true
+ save_only_model: false
+ report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
+ 
+ ### train
+-per_device_train_batch_size: 1
+-gradient_accumulation_steps: 8
++per_device_train_batch_size: 2
++gradient_accumulation_steps: 1
+ learning_rate: 1.0e-4
+ num_train_epochs: 3.0
+ lr_scheduler_type: cosine
+@@ -40,7 +40,7 @@ resume_from_checkpoint: null
+ 
+ ### eval
+ # eval_dataset: alpaca_en_demo
+-# val_size: 0.1
+-# per_device_eval_batch_size: 1
+-# eval_strategy: steps
+-# eval_steps: 500
++val_size: 0.1
++per_device_eval_batch_size: 4
++eval_strategy: steps
++eval_steps: 200
+diff --git a/examples/train_lora/llama3_lora_sft_alpaca.yaml b/examples/train_lora/llama3_lora_sft_alpaca.yaml
+new file mode 100644
+index 00000000..2a325384
+--- /dev/null
++++ b/examples/train_lora/llama3_lora_sft_alpaca.yaml
+@@ -0,0 +1,46 @@
++### model
++model_name_or_path: meta-llama/Meta-Llama-3-8B-Instruct
++trust_remote_code: true
++
++### method
++stage: sft
++do_train: true
++finetuning_type: lora
++lora_rank: 128
++lora_target: all
++
++### dataset
++dataset: identity,alpaca_en_demo
++template: llama3
++cutoff_len: 2048
++max_samples: 1000
++overwrite_cache: true
++preprocessing_num_workers: 16
++dataloader_num_workers: 4
++
++### output
++output_dir: saves/llama3-8b/lora/sft
++logging_steps: 10
++save_steps: 500
++plot_loss: true
++overwrite_output_dir: true
++save_only_model: false
++report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
++
++### train
++per_device_train_batch_size: 1
++gradient_accumulation_steps: 8
++learning_rate: 1.0e-4
++num_train_epochs: 3.0
++lr_scheduler_type: cosine
++warmup_ratio: 0.1
++bf16: true
++ddp_timeout: 180000000
++resume_from_checkpoint: null
++
++### eval
++# eval_dataset: alpaca_en_demo
++# val_size: 0.1
++# per_device_eval_batch_size: 1
++# eval_strategy: steps
++# eval_steps: 500
+diff --git a/examples/train_lora/llama_lora_uspto_alpaca.yaml b/examples/train_lora/llama_lora_uspto_alpaca.yaml
+new file mode 100644
+index 00000000..3fe8e30e
+--- /dev/null
++++ b/examples/train_lora/llama_lora_uspto_alpaca.yaml
+@@ -0,0 +1,56 @@
++### model
++model_name_or_path: ../../unsloth_llama3_8b #meta-llama/Meta-Llama-3-8B-Instruct
++trust_remote_code: true
++
++### method
++stage: sft
++do_train: true
++finetuning_type: lora
++lora_rank: 32
++lora_alpha: 64
++lora_dropout: 0.1
++lora_target: all
++deepspeed: examples/deepspeed/ds_z2_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
++
++### dataset
++dataset: chem_react_qa #identity,alpaca_en_demo
++dataset_dir: /inspire/ssd/project/sais-suiren-foundation-model-prediction/public/shan/llamaF/alpaca_uspto_experiments
++template: llama3
++cutoff_len: 2048
++max_samples: 1000000
++overwrite_cache: true
++preprocessing_num_workers: 16
++dataloader_num_workers: 4
++
++### output
++output_dir: saves/llama3-8b-alpaca/lora/sft-round2
++logging_steps: 10
++save_steps: 200
++plot_loss: true
++overwrite_output_dir: true
++save_only_model: false
++report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
++
++### train
++per_device_train_batch_size: 4
++gradient_accumulation_steps: 2
++learning_rate: 5.0e-5
++weight_decay: 0.001
++num_train_epochs: 4.0
++lr_scheduler_type: cosine
++warmup_ratio: 0.1
++bf16: true
++ddp_timeout: 180000000
++resume_from_checkpoint: null
++
++### eval
++eval_dataset: chem_react_qa_val #../uspto_experiments/mapped_valid_dataset.jsonl 
++per_device_eval_batch_size: 4
++eval_strategy: steps
++eval_steps: 200
++
++# eval_dataset: alpaca_en_demo
++# val_size: 0.1
++# per_device_eval_batch_size: 1
++# eval_strategy: steps
++# eval_steps: 500
+diff --git a/reaction_eval/eval_README.md b/reaction_eval/eval_README.md
+new file mode 100644
+index 00000000..9854e710
+--- /dev/null
++++ b/reaction_eval/eval_README.md
+@@ -0,0 +1,16 @@
++### Evaluation of WIPO MULTI-CLASS EVALUATION
++#change NGUPs to the number of GPUs in your setup
++```bash
++cd wipo_eval 
++bash eval.sh 2>&1 | tee -a eval_wipo.log
++```
++
++
++### Evaluation of further fine-tune following below scripts on USPTO-50k, UPSTO-Full dataset
++```bash
++cd uspto_eval 
++#to evaluate the uspto_full, uspto50_k without or with reaction class referring to below scripts 
++#related dataset is also within the folder
++#default number of GPUs being 8
++bash eval_dual.sh 2>&1 | tee -a eval_uspto50k_dual_no_class.log
++```
+diff --git a/reaction_eval/uspto_eval/eval_dual.sh b/reaction_eval/uspto_eval/eval_dual.sh
+new file mode 100644
+index 00000000..c34cd2c8
+--- /dev/null
++++ b/reaction_eval/uspto_eval/eval_dual.sh
+@@ -0,0 +1,19 @@
++#uspto_50k with or without reaction class
++model_id="ckpt_path/" #continued sft uspto-50k, dataset
++#uspto_50k with reaction class or without, local dataset path
++test_data="upsto_50k.json"
++topk=10
++for topk in 1 3 5 10
++do
++    echo "Running evaluation for topk=${topk}... for dataset ${dataset} and model ${model_id}"
++    output_dir="predctions_llama3_8b_top${topk}"
++    mkdir -p ${output_dir}
++    echo "Save result to ${output_dir}"
++    accelerate launch --multi-gpu --num_processes 8 evaluation_uspto.py \
++	--model_id ${model_id} \
++	--dataset_file_path ${test_data} --predict_folder ${output_dir} \
++	--output_path "llama3-8b_acc_predictions.jsonl" \
++	--num_samples ${topk} \
++	--batch_size 8 \
++	--max_new_tokens 256
++done
+diff --git a/reaction_eval/uspto_eval/evaluation_uspto.py b/reaction_eval/uspto_eval/evaluation_uspto.py
+new file mode 100644
+index 00000000..2ed99823
+--- /dev/null
++++ b/reaction_eval/uspto_eval/evaluation_uspto.py
+@@ -0,0 +1,365 @@
++import os
++import json
++from accelerate import Accelerator
++from transformers import AutoModelForCausalLM, AutoTokenizer
++from datasets import load_dataset
++import torch
++import tqdm
++import re
++import json
++from collections import defaultdict
++from rdkit import Chem
++
++#tqdm(range(100), desc="Processing items")
++
++accelerator = Accelerator()
++device = accelerator.device
++
++def cot_with_clear_format(smiles):
++    return f"""
++As professor in organic chemistry, identify reactants. Target molecule: {smiles}
++
++Please reason step by step, then provide the final answer after "FINAL ANSWER:".
++
++Reasoning steps:
++1. Analyze functional groups
++2. Identify possible disconnections
++3. Suggest starting materials
++
++After your reasoning, provide the final answer in this exact format:
++FINAL ANSWER: [SMILES here]
++
++Reasoning:
++"""
++
++def main(model_id, dataset_file_path, num_sample=5, output_path="predictions.jsonl", batch_size=4, max_new_tokens=128):
++    # -------------------------------------------------
++    # Setup accelerator (handles multi-GPU distribution)
++    # -------------------------------------------------
++
++    # -------------------------------------------------
++    # Load model + tokenizer
++    # -------------------------------------------------
++    tokenizer = AutoTokenizer.from_pretrained(model_id)
++    tokenizer.padding_side = "left"
++    model = AutoModelForCausalLM.from_pretrained(
++        model_id,
++        dtype=torch.bfloat16,
++        device_map={"": device},  # Accelerate maps to local device
++    )
++
++    # -------------------------------------------------
++    # Load dataset
++    #   assume dataset has fields: "question", "answer"
++    # -------------------------------------------------
++    dataset = load_dataset("json", data_files=dataset_file_path, split="train")
++
++    
++    #indices_to_keep = range(0, len(dataset), 41)
++    #filtered_dataset = dataset.select(indices_to_keep)
++    filtered_dataset = dataset
++    # Shard dataset across processes
++    dataset = filtered_dataset.shard(num_shards=accelerator.num_processes, index=accelerator.process_index)
++
++    # -------------------------------------------------
++    # Batched inference
++    # -------------------------------------------------
++    results = []
++    for i in tqdm.tqdm(range(0, len(dataset), batch_size), desc="Processing inference generation items"):
++        batch = dataset[i: i + batch_size]
++        questions = batch["instruction"]
++        #systems_prompt = batch["system"]
++        answer = batch["output"]
++        types = batch["Task type"]
++        messages = []
++        bs = len(questions)
++        for j in range(bs):
++            native = [{"role":"user", "content": questions[j]}]
++            #cot = [{"role":"user", "content":cot_with_clear_format(batch["Products"][j])}]
++            #cot_g = True
++            #messages.append(questions[j][:2])
++            messages.append(native)
++        # apply chat template
++        print(messages)
++        #assert 0
++        text = tokenizer.apply_chat_template(
++            messages,
++            tokenize = False,
++            add_generation_prompt = True, # Must add for generation
++            enable_thinking=False,
++        )#.to(device)
++        inputs = tokenizer(text, padding=True,truncation=True,return_tensors = "pt").to(device)
++        seq_len = len(inputs["input_ids"][0])
++
++        # Tokenize (right padding for batching)
++        '''
++        inputs = tokenizer(
++            questions,
++            return_tensors="pt",
++            padding=True,
++            truncation=True,
++        ).to(device)
++        #batch, seq_len = inputs.size()
++        seq_len = len(inputs["input_ids"][0])'''
++        #introduce topk sampling
++        #TODO, update this key to argparse
++        num_samples = num_sample
++        with torch.no_grad():
++            outputs = model.generate(
++                **inputs,
++                do_sample = False, #for top1 do_sample setting False, otherwise to be True, for multiple returns #num_return_sequences=num_samples, # top_5 generations
++                num_return_sequences=num_samples,
++                use_cache=True,
++                temperature = 0.0, #top_p = 0.8, top_k = 20, #temperature 0.0 or temperature 0.3 for top1
++                #with beam search
++                num_beams=num_samples,
++                max_new_tokens=max_new_tokens,
++                pad_token_id=tokenizer.pad_token_id,
++                eos_token_id=tokenizer.eos_token_id,
++            )
++
++        decoded = tokenizer.batch_decode(outputs[:, seq_len:], skip_special_tokens=True)
++        #print(f"===curent decoded is {decoded!r} ")
++        #assert 0
++
++        for index, (ans, q, type_t) in enumerate(zip(answer, questions, types)):
++            preds = decoded[index*num_samples:(index+1)*num_samples]
++            #Change to save SMILE Directly
++            results.append({
++                "Task type": type_t,
++                "question": q,
++                "gold_answer": ans,
++                "predicted_answer": preds,
++            })
++
++    # -------------------------------------------------
++    # Save per-rank results
++    # -------------------------------------------------
++    local_out = output_path
++    with open(local_out, "w") as f:
++        for r in results:
++            f.write(json.dumps(r, ensure_ascii=False) + "\n")
++
++    accelerator.wait_for_everyone()
++    if accelerator.is_main_process:
++        print(f"[Main] Inference complete. Outputs written as {output_path}.rank*")
++
++def json_exact(element):
++    #pattern_1 =  r"\{.*?\}" #r'\{(.*?)]\}'
++    #match = re.search(pattern_1, element, re.DOTALL)
++    fixed_json_string = element.replace("'", '"')
++    #ogger.info(f"Current match filded or not {pred} and {match.group(0)}")
++    try:
++        pred_json = json.loads(fixed_json_string)
++    except Exception as e:
++        pred_json = {}
++        print(f"An unexpected error occurred with {element}: {e}")
++    return pred_json
++        
++def standardize_to_canonical(smiles_string):
++    """
++    Takes ANY valid SMILES string (mapped, zero-mapped, or random),
++    strips all mapping, and returns a strict, clean Canonical SMILES.
++    """
++    if not isinstance(smiles_string, str) or not smiles_string.strip():
++        return None
++
++    try:
++        mol = Chem.MolFromSmiles(smiles_string)
++        if mol is None:
++            return None # The LLM hallucinated invalid grammar
++            
++        # Aggressively clear any mapping properties 
++        # (even though RDKit usually treats :0 as unmapped, this guarantees it)
++        for atom in mol.GetAtoms():
++            if atom.HasProp('molAtomMapNumber'):
++                atom.ClearProp('molAtomMapNumber')
++                
++        # Generate the strict, unmapped canonical string
++        return Chem.MolToSmiles(mol, doRandom=False, canonical=True)
++        
++    except Exception:
++        return None
++
++def metric_cal(folder_path):
++    print(f"start metric calculation with folder {folder_path!r}")
++    all_json_data = []
++    if not accelerator.is_main_process:
++        return {}
++    for filename in os.listdir(folder_path):
++        if filename.endswith('.jsonl'):  # Ensure you are processing only JSON files
++            filepath = os.path.join(folder_path, filename)
++            try:
++                #with open(filepath, 'r', encoding='utf-8') as f:
++                #    data = json.load(f)
++                #    all_json_data.append(data)
++                with open(filepath, 'r', encoding='utf-8') as f:
++                    for line in f:
++                        all_json_data.append(json.loads(line.strip()))
++            except json.JSONDecodeError as e:
++                print(f"Error decoding JSON from {filename}: {e}")
++            except FileNotFoundError:
++                print(f"File not found: {filename}")
++            except Exception as e:
++                print(f"An unexpected error occurred with {filename}: {e}")
++    scores_flex = []
++    scores_exact = []
++    num = len(all_json_data)
++    all_correct = defaultdict(int)
++    nums = defaultdict(int)
++    failed_parse = 0
++    for index in range(num):
++        print("=="*4+" START NEW "+"=="*4)
++        curr = all_json_data[index]
++        type_t = curr["Task type"]
++        correct = 0
++        correct_reagent = 0
++        correct_solvent = 0
++        #if type_t == "Condition": continue
++        nums[type_t] = nums[type_t] + 1
++        preds, gold = curr["predicted_answer"], curr["gold_answer"]
++        if type_t == "Condition":
++            print("DEBUG condition: ", preds)
++            nums["Solvents"] = nums["Solvents"] + 1
++            nums["Reagents"] = nums["Reagents"] + 1
++            reagents_gold = gold.split("reagents:")[-1].strip()
++            solvents_gold = gold.split("solvents:")[-1].split("reagents:")[0].strip()
++            '''
++            if "reagents:" in gold:
++                reagents_gold = gold.split("reagents:")[-1].strip()
++            else:
++                reagents_gold = None
++            '''#print(f"DEBUG reagents are {reagents_gold}")
++            #assert 0
++            '''if "solvents" in gold and "reagents" not in gold:
++                solvents_gold = gold.split("solvents:")[-1].strip()
++            elif "solvents" in gold and "reagents" in gold:
++                solvents_gold = gold.split("solvents:")[-1].strip()
++                reagents_gold = gold.split("solvents:")[0].split("reagents:")[-1].strip()
++            else:
++                solvents_gold = None
++            '''
++            for pred_json in preds:
++                print(f"Current pred_json is {pred_json} and {gold}")
++                reagents_pred = pred_json.split("reagents:")[-1].strip()
++                solvents_pred = pred_json.split("solvents:")[-1].split("reagents:")[0].strip()
++                #if "solvents" in pred_json and "reagents" not in pred_json:
++                #    solvents_pred = pred_json.split("solvents:")[-1].strip()
++                #elif "solvents" in pred_json and "reagents" in pred_json:
++                #solvents_pred = pred_json.split("solvents:")[-1].strip()
++                #reagents_pred = pred_json.split("solvents:")[0].split("reagents:")[-1].strip()
++                #solvents_pred = pred_json.split("solvents:")[-1].split("reagents:")[0].strip()
++                #else:
++                #    solvents_pred = None
++                print(f"Current predict condition for gold is {reagents_gold}, {solvents_gold} and for pred is {reagents_pred}, {solvents_pred}")
++                try:
++                    reagents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(reagents_pred))
++                    #solvents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(solvents_pred))
++                except Exception as e:
++                    print(f"for current index {index} canonical convert fail error ")
++                    reagents_pred = None
++                    failed_parse += 1
++
++                try:
++                    solvents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(solvents_pred))
++                except Exception as e:
++                    solvents_pred = None
++                    failed_parse += 1
++                #if reagents_pred is None:
++                #    print(f"Currrent pred val is None") 
++                #    continue
++                print(f"CONDITION, current solvents_gold {solvents_gold} and reagents_gold {reagents_gold} and predicted solvents_pred {solvents_pred}, reagents_pred {reagents_pred}")
++                print(f"CONDITION, condition comparision, reagents {reagents_pred == reagents_gold} and solenvts {solvents_pred == solvents_gold}")
++                if reagents_pred == reagents_gold and reagents_gold is not None:
++                    #all_correct["Reagents"] = all_correct["Reagents"] + 1
++                    correct_reagent = 1
++                if solvents_pred == solvents_gold and solvents_gold is not None:
++                    #all_correct["Solvents"] = all_correct["Solvents"] + 1
++                    correct_solvent = 1
++                if reagents_pred == reagents_gold and (reagents_gold is not None) and solvents_pred == solvents_gold and (solvents_gold is not None):
++                    correct = 1
++                    #break
++            all_correct["Reagents"] += correct_reagent
++            all_correct["Solvents"] += correct_solvent
++            all_correct[type_t] = all_correct[type_t] + correct
++            continue
++        #canonical
++        gold = standardize_to_canonical(gold) #Chem.MolToSmiles(Chem.MolFromSmiles(gold))
++
++        #extract gold
++        #gold_json = json_exact(gold)
++        #extract prediction
++        all_preds =[]
++        #for pred in preds:
++        print(f"Current predition is {preds}")
++        #all_preds.append(json_exact(preds[0]))
++        #all_preds.append(preds[0])
++        all_preds = preds
++        #print(f"Current predition with json parse is {all_preds[0]}")
++        #for val in gold:
++        val = gold
++        for pred_json in all_preds:
++            #print(f"Current pred_json is {pred_json} and {gold}")
++            try:
++                #convert answer to canonical represention
++                #pred_json = pred_json.replace("'", '"')
++                #pred_json = json.loads(pred_json)
++                #pred_json = pred_json["predicted_answer"]
++                #pred_json = ".".join([i for i in pred_json])
++                #pred_json = pred_json[:-3]
++                #print(f"Current json val is ", pred_json)
++                pred_json = pred_json
++                pred_json = standardize_to_canonical(pred_json) #Chem.MolToSmiles(Chem.MolFromSmiles(pred_json))
++            except Exception as e:
++                print(f"for current index {index} canonical convert fail error ")
++                pred_json = None
++                failed_parse += 1
++            pred_val = pred_json #pred_json.get("Answer", None)
++            #print(f"Current val {val} and pred val is {pred_val}")
++            if pred_val is None:
++                #print(f"Currrent pred val is None") 
++                continue
++            if val == pred_val:
++                correct = 1
++                break
++        all_correct[type_t] = all_correct[type_t] + correct
++    
++    print(f"Failed parse is {failed_parse}")
++    ans = dict()
++    print(f"All number of keys for different keys {nums}")
++    print(f"All correct json is {all_correct}")
++    for key in all_correct:
++        ans[key] = all_correct[key] / nums[key]
++    return ans
++
++
++if __name__ == "__main__":
++    import argparse
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--model_id", type=str, required=True, help="The model repo or local model path for inference")
++    parser.add_argument("--dataset_file_path", type=str, required=True, help="The path of evaluation jsonl file, only jsonl being test")
++    parser.add_argument("--predict_folder", type=str, default="predictions", help="The directory to export final answers ")
++    parser.add_argument("--output_path", type=str, default="predictions.jsonl", help="The file name for final export")
++    parser.add_argument("--batch_size", type=int, default=4, help="inference/evaluation batch size per device")
++    parser.add_argument("--max_new_tokens", type=int, default=128, help="max number of new tokens for generation to truncate")
++    parser.add_argument("--num_samples", type=int, default=1, help="Per sample, the number of answers to be generated")
++    args = parser.parse_args()
++    #args.output_path=args.predict_folder+'/'+args.output_path#f"top{num_samples}_rank{accelerator.process_index}_{output_path}"
++    args.output_path=args.predict_folder+'/'+f"top{args.num_samples}_rank{accelerator.process_index}_{args.output_path}"
++
++    
++    
++    main(
++        model_id=args.model_id,
++        dataset_file_path=args.dataset_file_path,
++        num_sample=args.num_samples,
++        output_path=args.output_path,
++        batch_size=args.batch_size,
++        max_new_tokens=args.max_new_tokens,
++    )
++    
++    acc = metric_cal(args.predict_folder)
++    print(f"Final acc is {acc!r}\n")
++    print(acc)
++    print("Done metric calculation")
++
+diff --git a/reaction_eval/wipo_eval/eval.sh b/reaction_eval/wipo_eval/eval.sh
+new file mode 100644
+index 00000000..861ed8d8
+--- /dev/null
++++ b/reaction_eval/wipo_eval/eval.sh
+@@ -0,0 +1,20 @@
++#multi-task, sft
++model_id="./model_path" #the finetuned model path
++dataset="test.jsonl"
++topk=10
++NGPUs=4 #number gpus being utilized for evaluation
++for topk in 1 3 5 10
++do
++    echo "Running evaluation for topk=${topk}... for dataset ${dataset} and model ${model_id}"
++    output_dir="predctions_llama3_8b_feb_top${topk}"
++    mkdir -p ${output_dir}
++    echo "Save result to ${output_dir}"
++    accelerate launch --multi-gpu --num_processes ${NGPUs} evaluation_uspto_1.py \
++	--model_id ${model_id} \
++        --dataset_file_path ${dataset} \
++        --predict_folder ${output_dir} \
++        --output_path "top1_llama3-8b-top1_acc_predictions.jsonl" \
++        --num_samples ${topk} \
++        --batch_size 8 \
++        --max_new_tokens 256
++done
+diff --git a/reaction_eval/wipo_eval/evaluation_uspto_1.py b/reaction_eval/wipo_eval/evaluation_uspto_1.py
+new file mode 100644
+index 00000000..3896bd09
+--- /dev/null
++++ b/reaction_eval/wipo_eval/evaluation_uspto_1.py
+@@ -0,0 +1,357 @@
++import os
++import json
++from accelerate import Accelerator
++from transformers import AutoModelForCausalLM, AutoTokenizer
++from datasets import load_dataset
++import torch
++import tqdm
++import re
++from collections import defaultdict
++from rdkit import Chem
++
++#tqdm(range(100), desc="Processing items")
++
++accelerator = Accelerator()
++device = accelerator.device
++
++def cot_with_clear_format(smiles):
++    return f"""
++As professor in organic chemistry, identify reactants. Target molecule: {smiles}
++
++Please reason step by step, then provide the final answer after "FINAL ANSWER:".
++
++Reasoning steps:
++1. Analyze functional groups
++2. Identify possible disconnections
++3. Suggest starting materials
++
++After your reasoning, provide the final answer in this exact format:
++FINAL ANSWER: [SMILES here]
++
++Reasoning:
++"""
++
++def main(model_id, dataset_file_path, num_sample=5, output_path="predictions.jsonl", batch_size=4, max_new_tokens=128):
++    # -------------------------------------------------
++    # Setup accelerator (handles multi-GPU distribution)
++    # -------------------------------------------------
++
++    # -------------------------------------------------
++    # Load model + tokenizer
++    # -------------------------------------------------
++    tokenizer = AutoTokenizer.from_pretrained(model_id)
++    tokenizer.padding_side = "left"
++    model = AutoModelForCausalLM.from_pretrained(
++        model_id,
++        dtype=torch.bfloat16,
++        device_map={"": device},  # Accelerate maps to local device
++    )
++
++    # -------------------------------------------------
++    # Load dataset
++    #   assume dataset has fields: "question", "answer"
++    # -------------------------------------------------
++    dataset = load_dataset("json", data_files=dataset_file_path, split="train")
++
++    # Shard dataset across processes
++    dataset = dataset.shard(num_shards=accelerator.num_processes, index=accelerator.process_index)
++
++    # -------------------------------------------------
++    # Batched inference
++    # -------------------------------------------------
++    results = []
++    for i in tqdm.tqdm(range(0, len(dataset), batch_size), desc="Processing inference generation items"):
++        batch = dataset[i: i + batch_size]
++        questions = batch["instruction"]
++        #systems_prompt = batch["system"]
++        answer = batch["output"]
++        types = batch["Task type"]
++        messages = []
++        bs = len(questions)
++        for j in range(bs):
++            native = [{"role":"user", "content": questions[j]}]
++            #cot = [{"role":"user", "content":cot_with_clear_format(batch["Products"][j])}]
++            #cot_g = True
++            #messages.append(questions[j][:2])
++            messages.append(native)
++        # apply chat template
++        print(messages)
++        #assert 0
++        text = tokenizer.apply_chat_template(
++            messages,
++            tokenize = False,
++            add_generation_prompt = True, # Must add for generation
++            enable_thinking=False,
++        )#.to(device)
++        inputs = tokenizer(text, padding=True,truncation=True,return_tensors = "pt").to(device)
++        seq_len = len(inputs["input_ids"][0])
++
++        # Tokenize (right padding for batching)
++        '''
++        inputs = tokenizer(
++            questions,
++            return_tensors="pt",
++            padding=True,
++            truncation=True,
++        ).to(device)
++        #batch, seq_len = inputs.size()
++        seq_len = len(inputs["input_ids"][0])'''
++        #introduce topk sampling
++        #TODO, update this key to argparse
++        num_samples = num_sample
++        with torch.no_grad():
++            outputs = model.generate(
++                **inputs,
++                # Recommended Qwen3 settings for non-reasoning
++                do_sample = False, #False for greedy top1 and beam search also, true for multiple returns #num_return_sequences=num_samples, # top_5 generations
++                num_return_sequences=num_samples,
++                use_cache=True,
++                #change to beam size
++                num_beams=num_samples,
++                max_new_tokens=max_new_tokens,
++                pad_token_id=tokenizer.pad_token_id,
++                eos_token_id=tokenizer.eos_token_id,
++            )
++
++        decoded = tokenizer.batch_decode(outputs[:, seq_len:], skip_special_tokens=True)
++        #print(f"===curent decoded is {decoded!r} ")
++        #assert 0
++
++        for index, (ans, q, type_t) in enumerate(zip(answer, questions, types)):
++            preds = decoded[index*num_samples:(index+1)*num_samples]
++            #Change to save SMILE Directly
++            results.append({
++                "Task type": type_t,
++                "question": q,
++                "gold_answer": ans,
++                "predicted_answer": preds,
++            })
++
++    # -------------------------------------------------
++    # Save per-rank results
++    # -------------------------------------------------
++    local_out = output_path
++    with open(local_out, "w") as f:
++        for r in results:
++            f.write(json.dumps(r, ensure_ascii=False) + "\n")
++
++    accelerator.wait_for_everyone()
++    if accelerator.is_main_process:
++        print(f"[Main] Inference complete. Outputs written as {output_path}.rank*")
++
++def json_exact(element):
++    #pattern_1 =  r"\{.*?\}" #r'\{(.*?)]\}'
++    #match = re.search(pattern_1, element, re.DOTALL)
++    fixed_json_string = element.replace("'", '"')
++    #ogger.info(f"Current match filded or not {pred} and {match.group(0)}")
++    try:
++        pred_json = json.loads(fixed_json_string)
++    except Exception as e:
++        pred_json = {}
++        print(f"An unexpected error occurred with {element}: {e}")
++    return pred_json
++
++pattern = r"(?:reactants:|reagents:)\s*(.*?)(?=\s*(?:reactants:|reagents:)|$)"
++
++def extract_smiles(text):
++    # findall returns a list of all SMILES found in the string
++    return [s.strip() for s in re.findall(pattern, text, re.IGNORECASE)]
++
++def extract_to_dict(text):
++    parts = {}
++    for label in ["reagents", "solvents"]:
++        match = re.search(f"{label}:\s*(.*?)(?=\s*(?:reagents:|solvents:)|$)", text, re.I)
++        if match:
++            parts[label] = match.group(1).strip()
++    return parts
++
++def metric_cal(folder_path):
++    print(f"start metric calculation with folder {folder_path!r}")
++    all_json_data = []
++    if not accelerator.is_main_process:
++        return {}
++    for filename in os.listdir(folder_path):
++        if filename.endswith('.jsonl'):  # Ensure you are processing only JSON files
++            filepath = os.path.join(folder_path, filename)
++            try:
++                #with open(filepath, 'r', encoding='utf-8') as f:
++                #    data = json.load(f)
++                #    all_json_data.append(data)
++                with open(filepath, 'r', encoding='utf-8') as f:
++                    for line in f:
++                        all_json_data.append(json.loads(line.strip()))
++            except json.JSONDecodeError as e:
++                print(f"Error decoding JSON from {filename}: {e}")
++            except FileNotFoundError:
++                print(f"File not found: {filename}")
++            except Exception as e:
++                print(f"An unexpected error occurred with {filename}: {e}")
++    scores_flex = []
++    scores_exact = []
++    num = len(all_json_data)
++    all_correct = defaultdict(int)
++    nums = defaultdict(int)
++    failed_parse = 0
++    for index in range(num):
++        print("=="*4+" START NEW "+"=="*4)
++        curr = all_json_data[index]
++        type_t = curr["Task type"]
++        correct = 0
++        correct_reagent = 0
++        correct_solvent = 0
++        if type_t != "Condition":
++            nums[type_t] = nums[type_t] + 1
++        preds, gold = curr["predicted_answer"], curr["gold_answer"]
++        if type_t == "Condition":
++            print("DEBUG condition: ", preds)
++            #nums["Solvents"] = nums["Solvents"] + 1
++            #nums["Reagents"] = nums["Reagents"] + 1
++            #reagents_gold = gold.split("reagents:")[-1].strip()
++            #solvents_gold = gold.split("solvents:")[-1].split("reagents:")[0].strip()
++            #solvents_gold = gold.split("solvents:")[-1].strip()
++            #reagents_gold = gold.split("reagents:")[-1].split("solvents:")[0].strip()
++            gold_dict = extract_to_dict(gold)
++            reagents_gold, solvents_gold = gold_dict.get("reagents"), gold_dict.get("solvents")
++            if reagents_gold is not None:
++                nums["Reagents"] = nums["Reagents"] + 1
++            if solvents_gold is not None:
++                nums["Solvents"] = nums["Solvents"] + 1
++            if solvents_gold is not None and reagents_gold is not None:
++                nums[type_t] = nums[type_t] + 1
++            '''
++            if "reagents:" in gold:
++                reagents_gold = gold.split("reagents:")[-1].strip()
++            else:
++                reagents_gold = None
++            '''#print(f"DEBUG reagents are {reagents_gold}")
++            #assert 0
++            '''if "solvents" in gold and "reagents" not in gold:
++                solvents_gold = gold.split("solvents:")[-1].strip()
++            elif "solvents" in gold and "reagents" in gold:
++                solvents_gold = gold.split("solvents:")[-1].strip()
++                reagents_gold = gold.split("solvents:")[0].split("reagents:")[-1].strip()
++            else:
++                solvents_gold = None
++            '''
++            for pred_json in preds:
++                print(f"Current pred_json is {pred_json} and {gold}")
++                #reagents_pred = pred_json.split("reagents:")[-1].strip()
++                #solvents_pred = pred_json.split("solvents:")[-1].split("reagents:")[0].strip()
++                #if "solvents" in pred_json and "reagents" not in pred_json:
++                #    solvents_pred = pred_json.split("solvents:")[-1].strip()
++                #elif "solvents" in pred_json and "reagents" in pred_json:
++                #solvents_pred = pred_json.split("solvents:")[-1].strip()
++                #reagents_pred = pred_json.split("solvents:")[0].split("reagents:")[-1].strip()
++                pred_dict = extract_to_dict(pred_json)
++                reagents_pred, solvents_pred = pred_dict.get("reagents"), pred_dict.get("solvents")
++                #solvents_pred = pred_json.split("solvents:")[-1].split("reagents:")[0].strip()
++                #else:
++                #    solvents_pred = None
++                print(f"Current predict condition for gold is {reagents_gold}, {solvents_gold} and for pred is {reagents_pred}, {solvents_pred}")
++                try:
++                    reagents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(reagents_pred))
++                    #solvents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(solvents_pred))
++                except Exception as e:
++                    print(f"for current index {index} canonical convert fail error ")
++                    reagents_pred = None
++                    failed_parse += 1
++
++                try:
++                    solvents_pred = Chem.MolToSmiles(Chem.MolFromSmiles(solvents_pred))
++                except Exception as e:
++                    solvents_pred = None
++                    failed_parse += 1
++                #if reagents_pred is None:
++                #    print(f"Currrent pred val is None") 
++                #    continue
++                print(f"CONDITION, current solvents_gold {solvents_gold} and reagents_gold {reagents_gold} and predicted solvents_pred {solvents_pred}, reagents_pred {reagents_pred}")
++                print(f"CONDITION, condition comparision, reagents {reagents_pred == reagents_gold} and solenvts {solvents_pred == solvents_gold}")
++                if reagents_pred == reagents_gold and reagents_gold is not None:
++                    #all_correct["Reagents"] = all_correct["Reagents"] + 1
++                    correct_reagent = 1
++                if solvents_pred == solvents_gold and solvents_gold is not None:
++                    #all_correct["Solvents"] = all_correct["Solvents"] + 1
++                    correct_solvent = 1
++                if reagents_pred == reagents_gold and (reagents_gold is not None) and solvents_pred == solvents_gold and (solvents_gold is not None):
++                    correct = 1
++                    #break
++            all_correct["Reagents"] += correct_reagent
++            all_correct["Solvents"] += correct_solvent
++            all_correct[type_t] = all_correct[type_t] + correct
++            continue
++        #canonical
++        gold = Chem.MolToSmiles(Chem.MolFromSmiles(gold))
++
++        #extract gold
++        #gold_json = json_exact(gold)
++        #extract prediction
++        all_preds =[]
++        #for pred in preds:
++        print(f"Current predition is {preds}")
++        #all_preds.append(json_exact(preds[0]))
++        #all_preds.append(preds[0])
++        all_preds = preds
++        #print(f"Current predition with json parse is {all_preds[0]}")
++        #for val in gold:
++        val = gold
++        for pred_json in all_preds:
++            #print(f"Current pred_json is {pred_json} and {gold}")
++            try:
++                #convert answer to canonical represention
++                #pred_json = pred_json.replace("'", '"')
++                #pred_json = json.loads(pred_json)
++                #pred_json = pred_json["predicted_answer"]
++                pred_json = pred_json
++                pred_json = Chem.MolToSmiles(Chem.MolFromSmiles(pred_json))
++            except Exception as e:
++                print(f"for current index {index} canonical convert fail error ")
++                pred_json = None
++                failed_parse += 1
++            pred_val = pred_json #pred_json.get("Answer", None)
++            #print(f"Current val {val} and pred val is {pred_val}")
++            if pred_val is None:
++                #print(f"Currrent pred val is None") 
++                continue
++            if val == pred_val:
++                correct = 1
++                break
++        all_correct[type_t] = all_correct[type_t] + correct
++    
++    print(f"Failed parse is {failed_parse}")
++    ans = dict()
++    print(f"All number of keys for different keys {nums}")
++    print(f"All correct json is {all_correct}")
++    for key in all_correct:
++        ans[key] = all_correct[key] / nums[key]
++    return ans
++
++
++if __name__ == "__main__":
++    import argparse
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--model_id", type=str, required=True, help="The model repo or local model path for inference")
++    parser.add_argument("--dataset_file_path", type=str, required=True, help="The path of evaluation jsonl file, only jsonl being test")
++    parser.add_argument("--predict_folder", type=str, default="predictions", help="The directory to export final answers ")
++    parser.add_argument("--output_path", type=str, default="predictions.jsonl", help="The file name for final export")
++    parser.add_argument("--batch_size", type=int, default=4, help="inference/evaluation batch size per device")
++    parser.add_argument("--max_new_tokens", type=int, default=128, help="max number of new tokens for generation to truncate")
++    parser.add_argument("--num_samples", type=int, default=1, help="Per sample, the number of answers to be generated")
++    args = parser.parse_args()
++    #args.output_path=args.predict_folder+'/'+args.output_path#f"top{num_samples}_rank{accelerator.process_index}_{output_path}"
++    args.output_path=args.predict_folder+'/'+f"top{args.num_samples}_rank{accelerator.process_index}_{args.output_path}"
++    
++    
++    main(
++        model_id=args.model_id,
++        dataset_file_path=args.dataset_file_path,
++        num_sample=args.num_samples,
++        output_path=args.output_path,
++        batch_size=args.batch_size,
++        max_new_tokens=args.max_new_tokens,
++    )
++    
++    acc = metric_cal(args.predict_folder)
++    print(f"Final acc is {acc!r}\n")
++    print(acc)
++    print("Done metric calculation")
++
+diff --git a/src/llamafactory/data/collator.py b/src/llamafactory/data/collator.py
+index cfeecd86..4bfdf8dc 100644
+--- a/src/llamafactory/data/collator.py
++++ b/src/llamafactory/data/collator.py
+@@ -318,5 +318,3 @@ class KTODataCollatorWithPadding(MultiModalDataCollatorForSeq2Seq):
+         if "token_type_ids" in kl_batch:
+             batch["kl_token_type_ids"] = kl_batch["token_type_ids"]
+ 
+-        batch["kto_tags"] = torch.tensor(kto_tags)
+-        return batch
+diff --git a/src/llamafactory/data/converter.py b/src/llamafactory/data/converter.py
+index ac3735e6..96706bdc 100644
+--- a/src/llamafactory/data/converter.py
++++ b/src/llamafactory/data/converter.py
+@@ -408,6 +408,7 @@ def align_dataset(
+     _audios: []
+     """
+     column_names = list(next(iter(dataset)).keys())
++    if "indice" in column_names: column_names.remove("indice") #add by SHAN, for rotary Dataset
+     kwargs = {}
+     if not data_args.streaming:
+         kwargs = dict(
+diff --git a/src/llamafactory/data/loader.py b/src/llamafactory/data/loader.py
+index b5adc139..5eade7db 100644
+--- a/src/llamafactory/data/loader.py
++++ b/src/llamafactory/data/loader.py
+@@ -159,6 +159,7 @@ def _load_single_dataset(
+         max_samples = min(data_args.max_samples, len(dataset))
+         dataset = dataset.select(range(max_samples))
+ 
++    print("DEBUG INFO, AT FIRST LOAD DATASET::: ", next(iter(dataset)))
+     return align_dataset(dataset, dataset_attr, data_args, training_args)
+ 
+ 
+@@ -181,6 +182,7 @@ def _get_merged_dataset(
+ 
+         datasets[dataset_name] = _load_single_dataset(dataset_attr, model_args, data_args, training_args)
+ 
++    print("===DEBUG INFO:: . after _load_single_dataset", datasets)
+     if return_dict:
+         return datasets
+     else:
+@@ -245,6 +247,7 @@ def _get_preprocessed_dataset(
+         data_args, stage, template, tokenizer, processor, do_generate=(training_args.predict_with_generate and is_eval)
+     )
+     column_names = list(next(iter(dataset)).keys())
++    if "indice" in column_names: column_names.remove("indice") #add by SHAN, to map rotary dataset
+     kwargs = {}
+     if not data_args.streaming:
+         kwargs = dict(
+@@ -311,6 +314,7 @@ def get_dataset(
+             return_dict=data_args.eval_on_each_dataset,
+         )
+ 
++    print("====DEBUG INFO====, DATASET BEFORE MAP: ", next(iter(dataset)))
+     with training_args.main_process_first(desc="pre-process dataset", local=(not data_args.data_shared_file_system)):
+         dataset = _get_preprocessed_dataset(
+             dataset, data_args, training_args, stage, template, tokenizer, processor, is_eval=False
+diff --git a/src/llamafactory/model/loader.py b/src/llamafactory/model/loader.py
+index 8793135f..5fe69634 100644
+--- a/src/llamafactory/model/loader.py
++++ b/src/llamafactory/model/loader.py
+@@ -143,6 +143,11 @@ def load_model(
+ 
+     model = None
+     lazy_load = False
++    #config.hidden_dropout_prob = 0.2  # Set your desired dropout rate
++    # attention_probs_dropout_prob controls dropout in the attention mechanism
++    #config.attention_probs_dropout_prob = 0.2
++    #logger.info(f" load model and final config {config} and init_kwargs is {init_kwargs}")
++
+     if model_args.use_unsloth:
+         if model_args.adapter_name_or_path is not None:
+             lazy_load = True
+@@ -167,6 +172,12 @@ def load_model(
+             else:
+                 load_class = AutoModelForCausalLM
+ 
++            #config.hidden_dropout_prob = 0.2  # Set your desired dropout rate
++            # attention_probs_dropout_prob controls dropout in the attention mechanism
++            #config.attention_probs_dropout_prob = 0.2
++
++            logger.info(f" load model and final config is {config} and init_kwargs is {init_kwargs}")
++            #assert 0
+             if model_args.train_from_scratch:
+                 model = load_class.from_config(config, trust_remote_code=model_args.trust_remote_code)
+             else:
+diff --git a/src/llamafactory/train/sft/dataset_utils.py b/src/llamafactory/train/sft/dataset_utils.py
+new file mode 100644
+index 00000000..92a6602b
+--- /dev/null
++++ b/src/llamafactory/train/sft/dataset_utils.py
+@@ -0,0 +1,32 @@
++class RotatingTemplateDataset(Dataset):
++    """
++    df must contain: 'molecule_hash', 'template_id', 'system_prompt_id', 'question', 'answer'
++    Each molecule can have multiple rows (different templates). We pick one row per molecule per epoch.
++    """
++    def __init__(self, df):
++        self.df = df.copy()
++        # group index list per molecule_hash
++        self.groups = self.df.groupby("indice").indices  # dict: hash -> array of indices
++
++    def sample_for_epoch(self, epoch):
++        picks = []
++        for mol_hash, idxs in self.groups.items():
++            # rotate index choice by epoch
++            pick_idx = idxs[epoch % len(idxs)]
++            picks.append(pick_idx)
++        self.epoch_df = self.df.loc[picks].reset_index(drop=True)
++
++    def __len__(self):
++        return len(self.epoch_df)
++
++    def __getitem__(self, idx):
++        row = self.epoch_df.iloc[idx]
++        #'indice','Products', 'Reactants', 'instruction', 'output', 'instruct_id'
++        return {
++            "indice": row["indice"],
++            "instruction": row["instruction"],
++            "output": row["output"],
++            "instruct_id": row["instruct_id"],
++            "Products": row["Products"],
++            "Reactants": row["Reactants"]
++        }
+diff --git a/src/llamafactory/train/sft/sampler_utils.py b/src/llamafactory/train/sft/sampler_utils.py
+new file mode 100644
+index 00000000..22e97c53
+--- /dev/null
++++ b/src/llamafactory/train/sft/sampler_utils.py
+@@ -0,0 +1,48 @@
++import torch
++from torch.utils.data import Sampler
++import random
++
++class SpecificIndexSampler(Sampler):
++    """
++    A sampler that returns indices based on a specific value in a dataset column for each epoch.
++    """
++    def __init__(self, data_source, index_column='indice', num_epochs=4):
++        self.data_source = data_source
++        self.index_column = index_column
++        self.num_epochs = num_epochs
++        self.current_epoch = 0
++        
++        # Pre-compute a mapping from index value to row indices for efficiency.
++        # This prevents repeated searching through the dataset in each epoch.
++        self.indices_map = {idx_val: [] for idx_val in range(1, num_epochs + 1)}
++        print(f"====DEBUG INFO, {data_source[0].keys()}")
++        if "indice" in data_source[0].keys():
++            for i, item in enumerate(data_source):
++                idx_val = item[index_column]
++                if idx_val in self.indices_map:
++                    self.indices_map[idx_val].append(i)
++        else:
++            for idx_val in range(1, num_epochs + 1):
++                self.indices_map[idx_val] = [i for i in range(len(data_source))]
++    
++    def __iter__(self):
++        # Determine the target index value based on the current epoch.
++        # For epoch 1, target is 1; for epoch 2, target is 2, etc.
++        target_idx_val = self.current_epoch + 1
++        
++        if target_idx_val in self.indices_map:
++            indices = self.indices_map[target_idx_val].copy() # Get the list of indices
++            #print("===DEBUG SHAN: ", indices)
++            random.shuffle(indices) # Shuffle the list in-place
++            return iter(indices)
++            #return iter(self.indices_map[target_idx_val])
++        else:
++            return iter([]) # Return an empty iterator if no matching rows are found.
++    
++    def __len__(self):
++        target_idx_val = self.current_epoch + 1
++        return len(self.indices_map.get(target_idx_val, []))
++    
++    def set_epoch(self, epoch):
++        """Allows the Trainer to communicate the current epoch to the sampler."""
++        self.current_epoch = epoch
+diff --git a/src/llamafactory/train/sft/trainer.py b/src/llamafactory/train/sft/trainer.py
+index d378a3a3..646520f3 100644
+--- a/src/llamafactory/train/sft/trainer.py
++++ b/src/llamafactory/train/sft/trainer.py
+@@ -31,6 +31,7 @@ from ...extras.packages import is_transformers_version_greater_than
+ from ..callbacks import SaveProcessorCallback
+ from ..trainer_utils import create_custom_optimizer, create_custom_scheduler
+ 
++from .sampler_utils import SpecificIndexSampler
+ 
+ if TYPE_CHECKING:
+     from torch.utils.data import Dataset
+@@ -101,7 +102,8 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
+         if self.finetuning_args.disable_shuffling:
+             return torch.utils.data.SequentialSampler(self.train_dataset)
+ 
+-        return super()._get_train_sampler(*args, **kwargs)
++        #return super()._get_train_sampler(*args, **kwargs)
++        return SpecificIndexSampler(self.train_dataset)
+ 
+     @override
+     def compute_loss(self, model, inputs, *args, **kwargs):
+diff --git a/src/llamafactory/train/sft/workflow.py b/src/llamafactory/train/sft/workflow.py
+index aab1cb13..66be70ae 100644
+--- a/src/llamafactory/train/sft/workflow.py
++++ b/src/llamafactory/train/sft/workflow.py
+@@ -49,8 +49,10 @@ def run_sft(
+     tokenizer = tokenizer_module["tokenizer"]
+     template = get_template_and_fix_tokenizer(tokenizer, data_args)
+     dataset_module = get_dataset(template, model_args, data_args, training_args, stage="sft", **tokenizer_module)
++    logger.info(f"Intialized the model with load_model with {model_args!r} and {finetuning_args!r}")
+     model = load_model(tokenizer, model_args, finetuning_args, training_args.do_train)
+ 
++
+     if getattr(model, "is_quantized", False) and not training_args.do_train:
+         setattr(model, "_hf_peft_config_loaded", True)  # hack here: make model compatible with prediction
+ 
+diff --git a/train_uspto.sh b/train_uspto.sh
+new file mode 100644
+index 00000000..874d9e3c
+--- /dev/null
++++ b/train_uspto.sh
+@@ -0,0 +1,2 @@
++#upsto-50k training, continuing from the wipo-multi-task, default for number of GPUs being 8
++CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 FORCE_TORCHRUN=1 llamafactory-cli train uspto_50k_class.yaml
+diff --git a/train_wipo.sh b/train_wipo.sh
+new file mode 100644
+index 00000000..96caa00a
+--- /dev/null
++++ b/train_wipo.sh
+@@ -0,0 +1,2 @@
++#default is for 4 GPUs training on H800 for about 1 day, for wipo_multi-task 2.4 dataset, GBS for 128 and lr 3e-5, feel free to tune and play around 
++CUDA_VISIBLE_DEVICES=0,1,2,3 FORCE_TORCHRUN=1 llamafactory-cli train wipo_multi_task_full.yaml
+diff --git a/uspto_50k_class.yaml b/uspto_50k_class.yaml
+new file mode 100644
+index 00000000..606d0a14
+--- /dev/null
++++ b/uspto_50k_class.yaml
+@@ -0,0 +1,47 @@
++### model
++model_name_or_path: saves/llama3-8b-wipo #to further finetune with wipo multi-task tasks' checkpoint
++trust_remote_code: true
++
++### method
++stage: sft
++do_train: true
++finetuning_type: full
++deepspeed: examples/deepspeed/ds_z2_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
++
++### dataset
++dataset: chem_react_qa_uspto50k_class #uspto50k_dataset, name in the data_info.json
++dataset_dir: data_uspto50/
++template: llama3
++cutoff_len: 2048
++max_samples: 1000000
++overwrite_cache: true
++preprocessing_num_workers: 16
++dataloader_num_workers: 4
++
++### output
++output_dir: saves/llama3-8b/uspto50_class
++logging_steps: 10
++save_steps: 800
++plot_loss: true
++overwrite_output_dir: true
++save_only_model: false
++report_to: none  # choices: [none, wandb, tensorboard, swanlab, mlflow]
++
++### train
++per_device_train_batch_size: 4
++gradient_accumulation_steps: 1
++learning_rate: 5.0e-6
++weight_decay: 0.001
++num_train_epochs: 1.0
++lr_scheduler_type: cosine
++warmup_ratio: 0.1
++bf16: true
++ddp_timeout: 180000000
++resume_from_checkpoint: null
++
++### eval
++eval_dataset: chem_react_qa_val_uspto50k_class #uspto50k_dataset_val, name in the data_info.json 
++per_device_eval_batch_size: 4
++eval_strategy: steps
++eval_steps: 800
++
+diff --git a/wipo_multi_task_full.yaml b/wipo_multi_task_full.yaml
+new file mode 100644
+index 00000000..c84b5fda
+--- /dev/null
++++ b/wipo_multi_task_full.yaml
+@@ -0,0 +1,47 @@
++### model
++model_name_or_path: ../../unsloth_llama3_8b #Change to your own llama3_8b_it model path 
++trust_remote_code: true
++
++### method
++stage: sft
++do_train: true
++finetuning_type: full
++deepspeed: examples/deepspeed/ds_z2_config.json  # choices: [ds_z0_config.json, ds_z2_config.json, ds_z3_config.json]
++
++### dataset
++dataset: chem_react_qa #the dataset name in data_info.json of the 2.4M wipo dataset
++dataset_dir: wipo_data #the directory of the wipo dataset and corresponding data_info.json
++template: llama3
++cutoff_len: 4096
++max_samples: 10000000
++overwrite_cache: true
++preprocessing_num_workers: 16
++dataloader_num_workers: 4
++
++### output
++output_dir: saves/llama3-8b-full/wipo
++logging_steps: 10
++save_steps: 3700
++plot_loss: true
++overwrite_output_dir: true
++save_only_model: false
++report_to: tensorboard  # choices: [none, wandb, tensorboard, swanlab, mlflow]
++
++### train
++per_device_train_batch_size: 4
++gradient_accumulation_steps: 8
++learning_rate: 3.0e-5
++weight_decay: 0.001
++num_train_epochs: 2.0
++lr_scheduler_type: cosine
++warmup_ratio: 0.1
++bf16: true
++ddp_timeout: 180000000
++resume_from_checkpoint: null
++
++### eval
++eval_dataset: chem_react_qa_val #validation dataset name within the about dataset_dir
++per_device_eval_batch_size: 4
++eval_strategy: steps
++eval_steps: 3700
++
