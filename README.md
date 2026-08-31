@@ -2,7 +2,7 @@
 
 Agentic-Syn-RRAG is the release repository for **Syn-RRAG**, a retrieval-augmented framework for single-step retrosynthesis and synthesis-protocol generation. Given a target product SMILES, the system combines a locally served SFT model, RXNGraphormer/FAISS precedent retrieval, LLM reranking, and LLM-guided protocol refinement.
 
-This repository contains the inference and evaluation runtime, a frozen 150-target benchmark, curated outputs, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
+This repository contains the inference and evaluation runtime, a 150-target evaluation set randomly sampled from the WIPO-2M held-out test set, redacted outputs from runs on that same set, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
 
 > **Research-use warning**
 > Generated routes and procedures are model outputs, not experimentally validated instructions. They must be reviewed by qualified chemists before use.
@@ -19,7 +19,6 @@ This repository contains the inference and evaluation runtime, a frozen 150-targ
 - [Batch inference](#batch-inference)
 - [Benchmark and evaluation](#benchmark-and-evaluation)
 - [Baselines and ablations](#baselines-and-ablations)
-- [Reproducibility and limitations](#reproducibility-and-limitations)
 - [Citation](#citation)
 
 ## Overview
@@ -69,8 +68,8 @@ The runtime supports:
 │   └── retrieval_sys.py               # Offline index-building utility
 ├── utils/reaction_plausibility.py     # Element and scaffold checks
 ├── benchmark/                         # Extraction and evaluation scripts
-├── evaluate/test_150.csv              # Frozen 150-target benchmark
-├── examples/                          # Curated, publication-facing outputs
+├── evaluate/test_150.csv              # 150-target random sample
+├── examples/                          # Redacted outputs (same 150)
 ├── target_mols/target_mol.csv         # Three product-only example targets
 ├── train_examples/                    # LLaMA-Factory patch and requirements
 ├── pretrained_classification_model/   # RXNGraphormer model location
@@ -125,8 +124,10 @@ The local checkpoint is loaded in bfloat16 with `device_map="auto"`; a compatibl
 Arrange the external runtime assets as follows:
 
 ```text
-Agentic-SynR-RAG/
-├── pretrained_classification_model/...
+Agentic-Syn-RRAG/
+├── pretrained_classification_model/
+│   ├── parameters.json                # RXNGraphormer config
+│   └── model/    
 ├── data/
 │   ├── offline_reaction_database.json
 │   ├── reaction_update.faiss
@@ -136,10 +137,9 @@ Agentic-SynR-RAG/
 └── evaluate/
     └── test_150.csv                    # included
 ```
+`data/` is the retrieval corpus: reaction records in `offline_reaction_database.json`, plus a FAISS index and index map built from `s_reactants>>s_products`. Each record is one patent reaction (SMILES, reagents/solvents, and experimental procedure).
 
-The RXNGraphormer classification checkpoint is available from [Figshare](https://doi.org/10.6084/m9.figshare.28356077). Extract it into `pretrained_classification_model/`.
-
-The reaction database, FAISS index, and `indices_map_update.npy` must be generated from the same ordered dataset. Mixing an index or index map from a different database ordering produces invalid retrieval results. This snapshot does not specify a public download URL for that matched asset set; obtain it from the project release or build it from an authorized reaction corpus. `mcp_tools/retrieval_sys.py` contains the offline index-building path; review its input and output paths before running it.
+Runtime assets (RXNGraphormer checkpoint, reaction database, FAISS index, and index map) are available from [Figshare](https://doi.org/10.6084/m9.figshare.XXXXXXX). Extract them to match the directory layout above.
 
 Place a Hugging Face-compatible SFT checkpoint under `checkpoints/`. It may be produced with the training procedure below or supplied separately by the project authors.
 
@@ -152,7 +152,7 @@ The training release is a patch against a fixed LLaMA-Factory revision, not a st
 ### 1. Prepare LLaMA-Factory
 
 ```bash
-cd /path/to/Agentic-SynR-RAG/train_examples
+cd /path/to/Agentic-Syn-RRAG/train_examples
 git clone https://github.com/hiyouga/LlamaFactory.git
 cd LlamaFactory
 
@@ -185,7 +185,7 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 ### 3. Prepare model and datasets
 
-Set `model_name_or_path` in the patched YAML files to a local Llama-3-8B-Instruct-compatible checkpoint. The paths included in the patch are environment-specific examples and must be changed.
+Set `model_name_or_path` in the patched YAML files to a local unsloth-Llama-3-8B-Instruct-compatible checkpoint. The paths included in the patch are environment-specific examples and must be changed.
 
 The provided YAML files expect:
 
@@ -194,31 +194,98 @@ LlamaFactory/
 ├── wipo_data/
 │   ├── dataset_info.json
 │   ├── train.jsonl
-│   └── valid.jsonl
+│   ├── valid.jsonl
+│   └── test.jsonl
 └── data_uspto50/
     ├── dataset_info.json
     ├── train_50k_class.jsonl
-    └── valid_50k_class.jsonl
+    ├── valid_50k_class.jsonl
+    └── test_50k_class.jsonl
 ```
 
-The patch adds dataset metadata templates under `data_wipo/` and `data_uspto50k/`. Copy or link the relevant template into the runtime dataset directory, or update `dataset_dir` in the YAML. Training and evaluation corpora are not bundled.
+The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into the directories above.
+
+To extract chemistry-related text from patent HTML and normalize it into structured reaction records, see [`train_examples/data_prep/demo.ipynb`](https://github.com/SamSamChu/Agentic-Syn-RRAG/blob/main/train_examples/data_prep/demo.ipynb).
 
 ### 4. Run training and SFT evaluation
 
-From the `LlamaFactory` root:
+Use syn-rrag-train. Commands assume `$LF_ROOT` unless noted.
 
 ```bash
-# WIPO multi-task training
-bash train_wipo.sh
-
-# USPTO-50K retrosynthesis/forward-prediction training
-bash train_uspto.sh
-
-# Patched WIPO and USPTO-50K evaluation instructions
-cd reaction_eval
+export LF_ROOT=/path/to/Agentic-Syn-RRAG/train_examples/LlamaFactory
 ```
 
-Review `wipo_multi_task_full.yaml` and `uspto_50k_class.yaml` before running, especially model paths, dataset paths, output directories, precision, batch size, and distributed settings. The reference WIPO run is intended for a multi-GPU setup; memory and throughput depend on local hardware.
+#### Step 1 — WIPO multi-task full SFT (4 GPUs)
+
+Edit `wipo_multi_task_full.yaml`:
+
+```yaml
+model_name_or_path: $BASE                    # Unsloth Llama-3-8B-Instruct base
+output_dir: saves/llama3-8b-full/wipo        # USPTO stage loads this path
+learning_rate: 3.0e-5                        # 2e-5 to 5e-5; 3e-5 is an example
+```
+
+Confirm `dataset_dir: wipo_data` and that `wipo_data/train.jsonl` and `valid.jsonl` are in place.
+
+```bash
+conda activate syn-rrag-train
+cd $LF_ROOT
+bash train_wipo.sh 2>&1 | tee train_wipo.log
+# equivalent:
+# CUDA_VISIBLE_DEVICES=0,1,2,3 FORCE_TORCHRUN=1 llamafactory-cli train wipo_multi_task_full.yaml
+```
+
+#### Step 2 — WIPO evaluation
+
+Must run from `$LF_ROOT/reaction_eval/wipo_eval` (relative paths in `eval.sh`).
+
+Edit `eval.sh`:
+
+```bash
+model_id="$LF_ROOT/saves/llama3-8b-full/wipo"
+dataset="$LF_ROOT/wipo_data/test.jsonl"
+```
+
+```bash
+conda activate syn-rrag-train
+cd $LF_ROOT/reaction_eval/wipo_eval
+bash eval.sh 2>&1 | tee eval_wipo.log
+```
+
+#### Step 3 — USPTO-50K class fine-tuning (8 GPUs)
+
+In `uspto_50k_class.yaml`, change only:
+
+```yaml
+model_name_or_path: saves/llama3-8b-full/wipo   # WIPO checkpoint from Step 1
+```
+
+Confirm `dataset_dir: data_uspto50/` and the jsonl files from §3.
+
+```bash
+conda activate syn-rrag-train
+cd $LF_ROOT
+bash train_uspto.sh 2>&1 | tee train_uspto.log
+# 8 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+```
+
+#### Step 4 — USPTO-50K evaluation
+
+Must run from `$LF_ROOT/reaction_eval/uspto_eval`.
+
+Edit `eval_dual.sh`:
+
+```bash
+model_id="$LF_ROOT/saves/llama3-8b/uspto50_class"   # USPTO checkpoint from Step 3
+test_data="$LF_ROOT/data_uspto50/test_50k_class.jsonl"
+```
+
+```bash
+conda activate syn-rrag-train
+cd $LF_ROOT/reaction_eval/uspto_eval
+bash eval_dual.sh 2>&1 | tee eval_uspto50k.log
+# default: 8 GPUs (--num_processes 8)
+```
 
 After export, place the Hugging Face checkpoint under `checkpoints/<local-sft-checkpoint>/`. The inference sections below use this checkpoint through `mcp_tools/local_llm_mcp.py`.
 
@@ -257,7 +324,7 @@ Do not commit `.env` or API credentials.
 Run the service in a dedicated terminal:
 
 ```bash
-cd /path/to/Agentic-SynR-RAG
+cd /path/to/Agentic-Syn-RRAG
 conda activate syn-rrag-sft-server
 
 python mcp_tools/local_llm_mcp.py \
@@ -344,9 +411,9 @@ Do not allow two processes to write to the same output prefix. Each shard writes
 
 ## Benchmark and evaluation
 
-### Reported benchmark
+### 150-target evaluation
 
-The accompanying manuscript evaluates the full pipeline on 150 targets sampled from the product-disjoint WIPO-2M held-out test set. The release snapshot includes this frozen subset at [`evaluate/test_150.csv`](./evaluate/test_150.csv).
+We evaluate on 150 targets randomly sampled from the product-disjoint WIPO-2M held-out test set. The list is saved as evaluate/test_150.csv.
 
 | Track | Evaluation setting | Reported result |
 | --- | --- | --- |
@@ -427,9 +494,9 @@ python benchmark/test_API_with_faithfulness_score.py \
 
 Use `--test_offline` with the faithfulness script only when its audit CSV already exists and only the summary should be recomputed.
 
-### Curated outputs
+### Example outputs
 
-The release includes redacted, publication-facing examples:
+The release includes redacted examples from the evaluation runs:
 
 | File | Contents |
 | --- | --- |
@@ -437,7 +504,7 @@ The release includes redacted, publication-facing examples:
 | [`examples/native_top1_display.csv`](./examples/native_top1_display.csv) | Native-LLM Top-1 records; despite the extension, this is concatenated JSON content |
 | [`examples/generate_only_top1_display.json`](./examples/generate_only_top1_display.json) | Retrieval-free Top-1 outputs |
 
-The files contain the same 150 targets in the same `idx` order, but their fields differ by experimental setting. API metadata, hidden reasoning, and credentials are excluded.
+All three files cover the same 150 targets in the same idx order; only the experimental setting and output fields differ. Sensitive fields (API metadata, credentials, and hidden reasoning) are removed.
 
 ## Baselines and ablations
 
@@ -467,23 +534,9 @@ python run_app.py \
   --num_samples 1
 ```
 
-### Simple RAG
-
-`--simple_rag` uses the structural retrieval results directly and omits semantic reranking. It is a code-supported diagnostic mode rather than the full Syn-RRAG setting.
-
-## Reproducibility and limitations
-
-- Reactant generation defaults to deterministic beam search (`do_sample=False`); condition sampling is opt-in and does not change that behavior.
-- No repository-wide random seed is set. GPU kernels and external model providers may still introduce variation.
-- The main benchmark runner processes records sequentially inside each shard; `--max_concurrency` configures LangGraph work within a record.
-- External model IDs and provider implementations can change. Record the code revision, endpoint/provider version, model IDs, asset versions, run directory, and logs.
-- Failed or warned validation paths are recorded in `validation_errors`. Inspect pathway IDs instead of assuming every result list is positionally aligned after filtering.
-- The rule-based checks are screening heuristics, not reaction simulation or experimental validation.
-- Judge scores depend on the prepared dataset and judge endpoint. Compare only runs evaluated from the same frozen inputs and report repeated-run aggregation where applicable.
-
 ## Citation
 
-Citation metadata will be added with the accompanying manuscript. Until then, cite both the manuscript and this repository when using the released code, benchmark, or examples.
+Citation metadata will be added with the accompanying manuscript. Until then, cite both the paper and this repository when using the released code, benchmark, or examples.
 
 ## License
 
