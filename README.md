@@ -198,9 +198,9 @@ LlamaFactory/
 │   └── test.jsonl
 └── data_uspto50/
     ├── dataset_info.json
-    ├── train_50k_class.jsonl
-    ├── valid_50k_class.jsonl
-    └── test_50k_class.jsonl
+    ├── train_50k_class.json
+    ├── valid_50k_class.json
+    └── test_50k_class.json
 ```
 
 The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into the directories above.
