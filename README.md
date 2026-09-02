@@ -2,7 +2,7 @@
 
 Agentic-Syn-RRAG is the release repository for **Syn-RRAG**, a retrieval-augmented framework for single-step retrosynthesis and synthesis-protocol generation. Given a target product SMILES, the system combines a locally served SFT model, RXNGraphormer/FAISS precedent retrieval, LLM reranking, and LLM-guided protocol refinement.
 
-This repository contains the inference and evaluation runtime, a 150-target evaluation set randomly sampled from the WIPO-2M held-out test set, redacted outputs from runs on that same set, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
+This repository contains the inference and evaluation runtime, a 150-target evaluation set randomly sampled from the WIPO-2M held-out test set, example outputs from runs on that same set, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
 
 > **Research-use warning**
 > Generated routes and procedures are model outputs, not experimentally validated instructions. They must be reviewed by qualified chemists before use.
@@ -69,9 +69,11 @@ The runtime supports:
 ├── utils/reaction_plausibility.py     # Element and scaffold checks
 ├── benchmark/                         # Extraction and evaluation scripts
 ├── evaluate/test_150.csv              # 150-target random sample
-├── examples/                          # Redacted outputs (same 150)
-├── target_mols/target_mol.csv         # Three product-only example targets
-├── train_examples/                    # LLaMA-Factory patch and requirements
+├── examples/                          # Example outputs (same 150)
+├── target_mols/
+│   ├── target_mol.csv                 # Three product SMILES (wet-lab confirmed)
+│   └── target_mol_top10_predictions_clean.jsonl  # Syn-RRAG Top-10 on those targets
+├── train_examples/                    # LLaMA-Factory patch; data_prep examples
 ├── pretrained_classification_model/   # RXNGraphormer model location
 ├── requirements_main.txt              # Main runtime environment
 ├── requirements_server.txt            # Local SFT service environment
@@ -127,21 +129,38 @@ Arrange the external runtime assets as follows:
 Agentic-Syn-RRAG/
 ├── pretrained_classification_model/
 │   ├── parameters.json                # RXNGraphormer config
-│   └── model/    
+│   └── model/
 ├── data/
 │   ├── offline_reaction_database.json
 │   ├── reaction_update.faiss
 │   └── indices_map_update.npy
 ├── checkpoints/
-│   └── <local-sft-checkpoint>/...
+│   ├── syn-rrag-wipo/
+│   ├── syn-rrag-wipo-without/
+│   └── syn-rrag-uspto50/
 └── evaluate/
     └── test_150.csv                    # included
 ```
+
 `data/` is the retrieval corpus: reaction records in `offline_reaction_database.json`, plus a FAISS index and index map built from `s_reactants>>s_products`. Each record is one patent reaction (SMILES, reagents/solvents, and experimental procedure).
 
 Runtime assets (RXNGraphormer checkpoint, reaction database, FAISS index, and index map) are available from [Figshare](https://doi.org/10.6084/m9.figshare.XXXXXXX). Extract them to match the directory layout above.
 
-Place a Hugging Face-compatible SFT checkpoint under `checkpoints/`. It may be produced with the training procedure below or supplied separately by the project authors.
+The SFT checkpoints are distributed through ModelScope at [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints). Download them into the repository so that the files are placed under `checkpoints/syn-rrag-wipo/`, `checkpoints/syn-rrag-wipo-without/`, and `checkpoints/syn-rrag-uspto50/`.
+
+```bash
+pip install modelscope-hub
+
+ms-hub download justcoins/Syn-RRAG-Checkpoints \
+  --repo-type model \
+  --include 'syn-rrag-wipo/**' 'syn-rrag-wipo-without/**' 'syn-rrag-uspto50/**' \
+  --local-dir './checkpoints' \
+  --max-workers 8
+```
+
+`syn-rrag-wipo` is the WIPO multi-task SFT (step 37500). `syn-rrag-wipo-without` is the WIPO-without checkpoint used in the paper figure (step 15000). `syn-rrag-uspto50` is the USPTO-50K class SFT. Point `wipo_eval/eval.sh` or `uspto_eval/eval_dual.sh` at the matching folder, or pass `--model_path ./checkpoints/<name>` to `local_llm_mcp.py`.
+
+WIPO and USPTO-50K training/eval jsonl files are not in this repository; they are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925) and go under `LlamaFactory/wipo_data/` and `LlamaFactory/data_uspto50/` as in [SFT training](#sft-training).
 
 ## SFT training
 
@@ -203,9 +222,19 @@ LlamaFactory/
     └── test_50k_class.json
 ```
 
+WIPO and USPTO-50K training/eval files are available from [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Place them under `LlamaFactory/wipo_data/` and `LlamaFactory/data_uspto50/` as shown above.
+
 The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into the directories above.
 
-To extract chemistry-related text from patent HTML and normalize it into structured reaction records, see [`train_examples/data_prep/demo.ipynb`](https://github.com/SamSamChu/Agentic-Syn-RRAG/blob/main/train_examples/data_prep/demo.ipynb).
+Patent HTML is turned into structured reaction records with [`train_examples/data_prep/demo.ipynb`](./train_examples/data_prep/demo.ipynb). Those records are then converted into SFT QA pairs (retrosynthesis, forward prediction, and condition prediction) by [`train_examples/data_prep/QA_construct_demo.py`](./train_examples/data_prep/QA_construct_demo.py).
+
+The script ships two built-in reaction records. Run it from the repository root:
+
+```bash
+python train_examples/data_prep/QA_construct_demo.py
+```
+
+It prints SFT QA jsonl to stdout. Replace the samples in the script to use your own records from `demo.ipynb`.
 
 ### 4. Run training and SFT evaluation
 
@@ -287,7 +316,7 @@ bash eval_dual.sh 2>&1 | tee eval_uspto50k.log
 # default: 8 GPUs (--num_processes 8)
 ```
 
-After export, place the Hugging Face checkpoint under `checkpoints/<local-sft-checkpoint>/`. The inference sections below use this checkpoint through `mcp_tools/local_llm_mcp.py`.
+After export, place the Hugging Face checkpoint under `checkpoints/` (for example `checkpoints/syn-rrag-wipo/`). The inference sections below use this checkpoint through `mcp_tools/local_llm_mcp.py`. Released checkpoints can also be downloaded from ModelScope as in [Models and data](#models-and-data).
 
 ## Configuration
 
@@ -328,14 +357,15 @@ cd /path/to/Agentic-Syn-RRAG
 conda activate syn-rrag-sft-server
 
 python mcp_tools/local_llm_mcp.py \
-  --model_path ./checkpoints/<local-sft-checkpoint>
+  --model_path ./checkpoints/syn-rrag-wipo
 ```
 
 The service listens on port `8000`. The inference entry points start `mcp_tools/mcp_rag.py` as a subprocess, so the retrieval tool does not require a second manually started service.
 
 ### 2. Predict synthesis plans from product SMILES
 
-The bundled input is a headerless CSV containing three targets:
+The bundled input is a headerless CSV of three product SMILES. These targets were confirmed in wet-lab experiments; the file is a short inference demo, not the 150-target evaluation set. Corresponding Syn-RRAG Top-10 outputs are in [`target_mols/target_mol_top10_predictions_clean.jsonl`](./target_mols/target_mol_top10_predictions_clean.jsonl).
+
 
 ```bash
 conda activate agentic-syn-rrag
@@ -496,15 +526,16 @@ Use `--test_offline` with the faithfulness script only when its audit CSV alread
 
 ### Example outputs
 
-The release includes redacted examples from the evaluation runs:
+Example outputs from the 150-target evaluation runs, plus the three wet-lab-confirmed targets:
 
 | File | Contents |
 | --- | --- |
 | [`examples/gemini25_top10_display.json`](./examples/gemini25_top10_display.json) | Full Syn-RRAG pathways, retrieved/reranked evidence, and final recipes |
 | [`examples/native_top1_display.csv`](./examples/native_top1_display.csv) | Native-LLM Top-1 records; despite the extension, this is concatenated JSON content |
 | [`examples/generate_only_top1_display.json`](./examples/generate_only_top1_display.json) | Retrieval-free Top-1 outputs |
+| [`target_mols/target_mol_top10_predictions_clean.jsonl`](./target_mols/target_mol_top10_predictions_clean.jsonl) | Syn-RRAG Top-10 on the three wet-lab-confirmed product targets |
 
-All three files cover the same 150 targets in the same idx order; only the experimental setting and output fields differ. Sensitive fields (API metadata, credentials, and hidden reasoning) are removed.
+API metadata and credentials are not included.
 
 ## Baselines and ablations
 
@@ -536,7 +567,8 @@ python run_app.py \
 
 ## Citation
 
-Citation metadata will be added with the accompanying manuscript. Until then, cite both the paper and this repository when using the released code, benchmark, or examples.
+Please cite the paper and this repository when using the code, evaluation data, or examples.
+
 
 ## License
 
