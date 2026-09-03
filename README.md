@@ -4,19 +4,17 @@ Agentic-Syn-RRAG is the release repository for **Syn-RRAG**, a retrieval-augment
 
 This repository contains the inference and evaluation runtime, a 150-target evaluation set randomly sampled from the WIPO-2M held-out test set, example outputs from runs on that same set, and a patch for reproducing the SFT training workflow with LLaMA-Factory.
 
-> **Research-use warning**
-> Generated routes and procedures are model outputs, not experimentally validated instructions. They must be reviewed by qualified chemists before use.
+
 
 ## Contents
 
 - [Overview](#overview)
 - [Repository structure](#repository-structure)
-- [Installation](#installation)
-- [Models and data](#models-and-data)
-- [SFT training](#sft-training)
-- [Configuration](#configuration)
+- [Environment setup](#environment-setup)
+  - [Inference](#inference)
+  - [Training](#training)
 - [Quick start](#quick-start)
-- [Batch inference](#batch-inference)
+- [SFT training](#sft-training)
 - [Benchmark and evaluation](#benchmark-and-evaluation)
 - [Baselines and ablations](#baselines-and-ablations)
 - [Citation](#citation)
@@ -25,10 +23,10 @@ This repository contains the inference and evaluation runtime, a 150-target eval
 
 Syn-RRAG implements a **Generate–Retrieve–Refine** workflow:
 
-1. **Generate** — the local SFT model proposes candidate reactants and initial reagents/solvents.
-2. **Retrieve** — RXNGraphormer embeds each proposed reaction and FAISS returns ten structurally similar patent precedents.
-3. **Rerank** — the configured reranking model scores the retrieved precedents and retains the three most relevant records.
-4. **Refine** — the configured main model reviews the pathway and evidence, applies output validation, and writes a structured protocol.
+1. **Generate** — the local SFT model generates candidate reactants through reaction-state beam search, followed by initial reagents and solvents.
+2. **Retrieve** — RXNGraphormer embeds each proposed reaction, FAISS retrieves ten structurally similar patent precedents, and a re-ranking model selects the three most relevant records.
+3. **Refine** — the configured main model evaluates the proposed pathway against the retrieved evidence, refines unsupported components, and produces a validated, structured protocol.
+
 
 The ten retrieved precedents in step 2 are distinct from the final Top-10 pathway candidates produced when `--num_samples 10` is used.
 
@@ -40,12 +38,13 @@ The ten retrieved precedents in step 2 are distinct from the final Top-10 pathwa
 
 The runtime supports:
 
-- full Syn-RRAG inference;
-- Top-k pathway generation with canonicalization, chemical checks, deduplication, and reranking;
-- product-only prediction and benchmark CSV input;
-- deterministic index-based sharding with resumable checkpoints;
-- retrieval-free, simple-RAG, and native-LLM comparisons;
-- rule-based reactant metrics, protocol judging, and faithfulness evaluation.
+- Generate–Retrieve–Refine workflow — integrates reaction generation, precedent retrieval and evidence-guided refinement to produce complete, executable protocols specifying reactants, reagents, solvents, quantities, temperature and reaction time.
+- Reaction-state beam search — explores and ranks complete candidate reactions as reaction states, enabling diverse, chemically plausible routes across distinct reaction classes and disconnection strategies.
+- Reaction-level precedent retrieval — embeds entire proposed reactions and retrieves relevant experimental precedents from a large patent-derived database.
+- Symbolic chemical verification — evaluates molecular validity, elemental consistency and structural compatibility to filter implausible reaction hypotheses.
+- Evidence-guided protocol refinement — corrects unsupported reaction components and completes missing experimental parameters using retrieved precedents.
+- Automated synthesis compatibility — produces structured protocols suitable for robotic execution, experimentally validated through the successful synthesis of three virtually screened drug candidates.
+
 
 ## Repository structure
 
@@ -82,20 +81,20 @@ The runtime supports:
 
 Large model weights, the reaction database, and its FAISS index are not included.
 
-## Installation
+## Environment setup
 
-The main pipeline and the local SFT service use separate environments because their PyTorch and Transformers requirements differ. The commands below assume Bash; adapt activation and line-continuation syntax on other shells.
-
-### 1. Clone the repository
+The commands below assume Bash; adapt activation and line-continuation syntax on other shells.
 
 ```bash
 git clone https://github.com/SamSamChu/Agentic-Syn-RRAG.git
 cd Agentic-Syn-RRAG
 ```
 
-### 2. Install the main runtime
+### Inference
 
-Python 3.10 is recommended.
+The main pipeline and the local SFT service use separate environments because their PyTorch and Transformers requirements differ.
+
+**1. Main runtime** (Python 3.10):
 
 ```bash
 conda create -n agentic-syn-rrag python=3.10 -y
@@ -109,9 +108,7 @@ git clone -b pytorch2 https://github.com/licheng-xu-echo/RXNGraphormer.git
 pip install ./RXNGraphormer
 ```
 
-### 3. Install the local SFT service
-
-Python 3.12 is recommended for the versions pinned in `requirements_server.txt`.
+**2. Local SFT service** (Python 3.12):
 
 ```bash
 conda create -n syn-rrag-sft-server python=3.12 -y
@@ -121,52 +118,211 @@ pip install -r requirements_server.txt
 
 The local checkpoint is loaded in bfloat16 with `device_map="auto"`; a compatible accelerator and sufficient memory are therefore expected for normal use.
 
-## Models and data
-
-Arrange the external runtime assets as follows:
+**3. Download runtime assets** and place them as follows:
 
 ```text
 Agentic-Syn-RRAG/
 ├── pretrained_classification_model/
-│   ├── parameters.json                # RXNGraphormer config
-│   └── model/
+│   ├── parameters.json                # already in this repository
+│   └── model/                         # RXNGraphormer weights (ModelScope)
 ├── data/
 │   ├── offline_reaction_database.json
 │   ├── reaction_update.faiss
 │   └── indices_map_update.npy
 ├── checkpoints/
-│   ├── syn-rrag-wipo/
-│   ├── syn-rrag-wipo-without/
-│   └── syn-rrag-uspto50/
+│   └── syn-rrag-wipo/
 └── evaluate/
-    └── test_150.csv                    # included
+    └── test_150.csv                    # already in this repository
 ```
 
 `data/` is the retrieval corpus: reaction records in `offline_reaction_database.json`, plus a FAISS index and index map built from `s_reactants>>s_products`. Each record is one patent reaction (SMILES, reagents/solvents, and experimental procedure).
 
-Runtime assets (RXNGraphormer checkpoint, reaction database, FAISS index, and index map) are available from [Figshare](https://doi.org/10.6084/m9.figshare.XXXXXXX). Extract them to match the directory layout above.
-
-The SFT checkpoints are distributed through ModelScope at [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints). Download them into the repository so that the files are placed under `checkpoints/syn-rrag-wipo/`, `checkpoints/syn-rrag-wipo-without/`, and `checkpoints/syn-rrag-uspto50/`.
+The WIPO SFT checkpoint and RXNGraphormer weights (`pretrained_classification_model/model/`) are on ModelScope at [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints):
 
 ```bash
 pip install modelscope-hub
 
 ms-hub download justcoins/Syn-RRAG-Checkpoints \
   --repo-type model \
-  --include 'syn-rrag-wipo/**' 'syn-rrag-wipo-without/**' 'syn-rrag-uspto50/**' \
+  --include 'syn-rrag-wipo/**' \
   --local-dir './checkpoints' \
+  --max-workers 8
+
+ms-hub download justcoins/Syn-RRAG-Checkpoints \
+  --repo-type model \
+  --include 'pretrained_classification_model/model/**' \
+  --local-dir '.' \
   --max-workers 8
 ```
 
-`syn-rrag-wipo` is the WIPO multi-task SFT (step 37500). `syn-rrag-wipo-without` is the WIPO-without checkpoint used in the paper figure (step 15000). `syn-rrag-uspto50` is the USPTO-50K class SFT. Point `wipo_eval/eval.sh` or `uspto_eval/eval_dual.sh` at the matching folder, or pass `--model_path ./checkpoints/<name>` to `local_llm_mcp.py`.
+The reaction database, FAISS index, and index map are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Extract them into `data/`.
 
-WIPO and USPTO-50K training/eval jsonl files are not in this repository; they are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925) and go under `LlamaFactory/wipo_data/` and `LlamaFactory/data_uspto50/` as in [SFT training](#sft-training).
+`syn-rrag-wipo` is the WIPO multi-task SFT. Pass `--model_path ./checkpoints/syn-rrag-wipo` to `local_llm_mcp.py`.
+
+Inference does not need the Unsloth base model or the WIPO/USPTO training jsonl files.
+
+### Training
+
+Use a third environment for LLaMA-Factory SFT. Python 3.12 and CUDA 12.8 are recommended.
+
+```bash
+conda create -n syn-rrag-train python=3.12 -y
+conda activate syn-rrag-train
+```
+
+Then clone, patch, and `pip install` LLaMA-Factory as in [SFT training](#sft-training).
+
+**Base model.** WIPO SFT starts from Unsloth Llama-3-8B-Instruct ([`unsloth/llama-3-8b-Instruct`](https://huggingface.co/unsloth/llama-3-8b-Instruct) on Hugging Face). Download a local copy and set `model_name_or_path` in `wipo_multi_task_full.yaml`. Hugging Face gated access may require `hf auth login`.
+
+**Training and eval jsonl.** `wipo_data.zip` and `data_uspto50.zip` are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Place them under `LlamaFactory/` as:
+
+```text
+LlamaFactory/
+├── wipo_data/
+│   ├── dataset_info.json
+│   ├── train.jsonl
+│   ├── valid.jsonl
+│   └── test.jsonl
+└── data_uspto50/
+    ├── dataset_info.json
+    ├── train_50k_class.json
+    ├── valid_50k_class.json
+    └── test_50k_class.json
+```
+
+**Released SFT weights (optional).** To skip WIPO training and only run USPTO, download `syn-rrag-wipo` from [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints) and point `uspto_50k_class.yaml` at that folder. For USPTO Top-k evaluation, download `syn-rrag-uspto50` from the same repo and point `eval_dual.sh` at it (for example `checkpoints/syn-rrag-uspto50/`). Retrieval assets (`data/`, RXNGraphormer) are not required for SFT training.
+
+Then continue with the commands in [SFT training](#sft-training).
+
+## Quick start
+
+Complete the inference environments and runtime downloads in [Environment setup → Inference](#inference) first. If that is not done yet, start there.
+
+### 1. API credentials
+
+```bash
+cp .env.example .env
+```
+
+Fill at least `SOTA_API_KEY` and `RERANK_API_KEY`. Do not commit `.env` or API credentials. The full variable list is at the end of this section.
+
+### 2. Start the local pathway service
+
+Run the service in a dedicated terminal:
+
+```bash
+cd /path/to/Agentic-Syn-RRAG
+conda activate syn-rrag-sft-server
+
+python mcp_tools/local_llm_mcp.py \
+  --model_path ./checkpoints/syn-rrag-wipo
+```
+
+The service listens on port `8000`. The inference entry points start `mcp_tools/mcp_rag.py` as a subprocess, so the retrieval tool does not require a second manually started service.
+
+### 3. Predict synthesis plans from product SMILES
+
+The bundled input is a headerless CSV of three product SMILES. These targets were confirmed in wet-lab experiments; the file is a short inference demo, not the 150-target evaluation set. Corresponding Syn-RRAG Top-10 outputs are in [`target_mols/target_mol_top10_predictions_clean.jsonl`](./target_mols/target_mol_top10_predictions_clean.jsonl).
+
+```bash
+conda activate agentic-syn-rrag
+
+python predict_target_mols.py \
+  -f target_mols/target_mol.csv \
+  --num_samples 10 \
+  -o target_mols/target_mol_top10_predictions.jsonl
+```
+
+For a headered CSV, pass `--smiles_column <column>`. Without that option, the script recognizes common names including `smiles`, `target_smiles`, `product_smiles`, and `s_products`. Every input SMILES is validated and canonicalized with RDKit before inference.
+
+The output contains one pretty-printed JSON object per target. A checkpoint named `<output>.checkpoint.json` is maintained during execution and removed after all targets complete successfully. If a run is interrupted, rerunning the same command resumes from the checkpoint or existing output.
+
+Optional modes:
+
+```bash
+# SFT proposal + final generation, without retrieval or reranking
+python predict_target_mols.py -f target_mols/target_mol.csv --generate_only
+
+# Structural retrieval without semantic reranking
+python predict_target_mols.py -f target_mols/target_mol.csv --simple_rag
+```
+
+`--condition_sampling` affects only local SFT reagent/solvent generation. Reactant generation remains deterministic beam search. Its sampling controls are `--condition_temperature`, `--condition_top_p`, and `--condition_top_k`.
+
+### 4. Batch inference (150 targets)
+
+`run_app.py` is the benchmark and ablation entry point. Its input CSV must contain `k`, `v`, `s_products`, `s_reactants`, `s_reagents`, `s_solvents`, and a Python-literal-compatible `clean_response` field. The included `evaluate/test_150.csv` has 150 rows and the required columns.
+
+A single-process run is:
+
+```bash
+python run_app.py \
+  -f ./evaluate/test_150.csv \
+  -s ./evaluate/syn_rrag_top10/model \
+  -p ./evaluate/syn_rrag_top10/run \
+  --num_samples 10 \
+  --max_concurrency 1
+```
+
+For a multi-process run:
+
+```bash
+RUN_ID="$(date +%Y%m%d_%H%M%S)_syn_rrag_top10"
+RUN_DIR="./evaluate/${RUN_ID}"
+OUTPUT_STEM="01_gemini25_top10"
+mkdir -p "$RUN_DIR"
+printf '%s\n' "$OUTPUT_STEM" > "$RUN_DIR/OUTPUT_STEM.txt"
+
+for sid in $(seq 0 9); do
+  SHARD_DIR="$RUN_DIR/shard_${sid}"
+  mkdir -p "$SHARD_DIR"
+  nohup python run_app.py \
+    -f ./evaluate/test_150.csv \
+    -s "$SHARD_DIR/${OUTPUT_STEM}_model" \
+    -p "$SHARD_DIR/${OUTPUT_STEM}_" \
+    --num_samples 10 \
+    --shard_id "$sid" \
+    --num_shards 10 \
+    --total_records 150 \
+    --max_concurrency 1 \
+    > "$SHARD_DIR/${OUTPUT_STEM}.log" 2>&1 &
+done
+```
+
+Do not allow two processes to write to the same output prefix. Each shard writes:
+
+- `${OUTPUT_STEM}_model.pkl`: a stream of pickled records;
+- `${OUTPUT_STEM}_model.json`: pretty-printed, concatenated JSON objects, not a JSON array;
+- `${OUTPUT_STEM}__checkpoint.json`: resumable progress, removed after that shard completes;
+- `${OUTPUT_STEM}.log`: redirected process output from the command above.
+
+After a 150-target run, compute metrics as in [Benchmark and evaluation](#benchmark-and-evaluation).
+
+### API variables
+
+| Variable | Used for | Default in code |
+| --- | --- | --- |
+| `SOTA_MODEL` | Final pathway review and protocol generation | `gemini-2.5-pro` |
+| `SOTA_API_KEY` | Main-model API credential | none |
+| `SOTA_BASE_URL` | OpenAI-compatible main-model endpoint | `https://www.litellm.org/` |
+| `SOTA_TEMPERATURE` | Main-model temperature | `1.0` |
+| `RERANK_MODEL` | Patent-precedent reranking | `gemini-2.5-flash` |
+| `RERANK_API_KEY` | Reranking-model credential | none |
+| `RERANK_BASE_URL` | OpenAI-compatible reranking endpoint | `https://www.litellm.org/` |
+| `RERANK_TEMPERATURE` | Reranking temperature | `1.0` |
+| `LLM_SERVER_URL` | Local SFT MCP endpoint | `http://localhost:8000/mcp` |
+| `TEST_API_KEY`, `TEST_BASE_URL` | Evaluation-model credential and endpoint | endpoint defaults to LiteLLM |
+| `TEST_JUDGE_MODEL_GPT` | Protocol judge | `gpt-5-pro` |
+| `TEST_FAITHFULNESS_MODEL` | Faithfulness judge | `gpt-5-pro` |
+| `TEST_FAITHFULNESS_TEMPERATURE` | Faithfulness-judge temperature | `1.0` in code |
+
+`LLM_BASE_URL` is retained in `self_refine_loop_agent.py` for an OpenAI-compatible local client, but the current generation path communicates through `LLM_SERVER_URL`. The native baseline is also a legacy path: it reads `SOTA_MODEL` and `SOTA_API_KEY` but currently uses a fixed LiteLLM gateway URL.
 
 ## SFT training
 
-The SFT checkpoint is a prerequisite for the **Generate** stage. If you do not have a checkpoint distributed by the project authors, train and export one before proceeding to [Configuration](#configuration) and [Quick start](#quick-start).
+Complete the training environment, Unsloth base model, and WIPO/USPTO jsonl files in [Environment setup → Training](#training) first. If that is not done yet, start there.
 
-The training release is a patch against a fixed LLaMA-Factory revision, not a standalone trainer. All commands in this section start in `train_examples/`.
+The steps below start in `train_examples/` after that. The training release is a patch against a fixed LLaMA-Factory revision, not a standalone trainer.
 
 ### 1. Prepare LLaMA-Factory
 
@@ -185,12 +341,10 @@ The clone directory is `LlamaFactory`. The pinned commit is required because the
 
 ### 2. Install training dependencies
 
-The supplied training requirements target Python 3.12 and CUDA 12.8:
+From the patched `LlamaFactory` directory, with `syn-rrag-train` active:
 
 ```bash
-conda create -n syn-rrag-train python=3.12 -y
 conda activate syn-rrag-train
-
 pip install .
 pip install -r ../requirements.txt \
   --extra-index-url https://download.pytorch.org/whl/cu128
@@ -204,27 +358,9 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 ### 3. Prepare model and datasets
 
-Set `model_name_or_path` in the patched YAML files to a local unsloth-Llama-3-8B-Instruct-compatible checkpoint. The paths included in the patch are environment-specific examples and must be changed.
+Set `model_name_or_path` in `wipo_multi_task_full.yaml` to the local Unsloth directory from [Training](#training). Paths in the patch are environment-specific examples and must be changed.
 
-The provided YAML files expect:
-
-```text
-LlamaFactory/
-├── wipo_data/
-│   ├── dataset_info.json
-│   ├── train.jsonl
-│   ├── valid.jsonl
-│   └── test.jsonl
-└── data_uspto50/
-    ├── dataset_info.json
-    ├── train_50k_class.json
-    ├── valid_50k_class.json
-    └── test_50k_class.json
-```
-
-WIPO and USPTO-50K training/eval files are available from [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Place them under `LlamaFactory/wipo_data/` and `LlamaFactory/data_uspto50/` as shown above.
-
-The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into the directories above.
+Place Figshare jsonl files as shown there. The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into `wipo_data/` and `data_uspto50/`.
 
 Patent HTML is turned into structured reaction records with [`train_examples/data_prep/demo.ipynb`](./train_examples/data_prep/demo.ipynb). Those records are then converted into SFT QA pairs (retrosynthesis, forward prediction, and condition prediction) by [`train_examples/data_prep/QA_construct_demo.py`](./train_examples/data_prep/QA_construct_demo.py).
 
@@ -281,7 +417,7 @@ cd $LF_ROOT/reaction_eval/wipo_eval
 bash eval.sh 2>&1 | tee eval_wipo.log
 ```
 
-#### Step 3 — USPTO-50K class fine-tuning (8 GPUs)
+#### Step 3 — USPTO-50K class fine-tuning (4 GPUs)
 
 In `uspto_50k_class.yaml`, change only:
 
@@ -289,13 +425,13 @@ In `uspto_50k_class.yaml`, change only:
 model_name_or_path: saves/llama3-8b-full/wipo   # WIPO checkpoint from Step 1
 ```
 
-Confirm `dataset_dir: data_uspto50/` and the jsonl files from §3.
+On 4 GPUs keep `gradient_accumulation_steps: 2` so the global batch stays 32. Confirm `dataset_dir: data_uspto50/` and the jsonl files from §3.
 
 ```bash
 conda activate syn-rrag-train
 cd $LF_ROOT
 bash train_uspto.sh 2>&1 | tee train_uspto.log
-# 8 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+# 4 GPUs: CUDA_VISIBLE_DEVICES=0,1,2,3
 ```
 
 #### Step 4 — USPTO-50K evaluation
@@ -313,131 +449,10 @@ test_data="$LF_ROOT/data_uspto50/test_50k_class.jsonl"
 conda activate syn-rrag-train
 cd $LF_ROOT/reaction_eval/uspto_eval
 bash eval_dual.sh 2>&1 | tee eval_uspto50k.log
-# default: 8 GPUs (--num_processes 8)
+# default: 4 GPUs (--num_processes 4)
 ```
 
-After export, place the Hugging Face checkpoint under `checkpoints/` (for example `checkpoints/syn-rrag-wipo/`). The inference sections below use this checkpoint through `mcp_tools/local_llm_mcp.py`. Released checkpoints can also be downloaded from ModelScope as in [Models and data](#models-and-data).
-
-## Configuration
-
-Copy the template and replace placeholder credentials:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Used for | Default in code |
-| --- | --- | --- |
-| `SOTA_MODEL` | Final pathway review and protocol generation | `gemini-2.5-pro` |
-| `SOTA_API_KEY` | Main-model API credential | none |
-| `SOTA_BASE_URL` | OpenAI-compatible main-model endpoint | `https://www.litellm.org/` |
-| `SOTA_TEMPERATURE` | Main-model temperature | `1.0` |
-| `RERANK_MODEL` | Patent-precedent reranking | `gemini-2.5-flash` |
-| `RERANK_API_KEY` | Reranking-model credential | none |
-| `RERANK_BASE_URL` | OpenAI-compatible reranking endpoint | `https://www.litellm.org/` |
-| `RERANK_TEMPERATURE` | Reranking temperature | `1.0` |
-| `LLM_SERVER_URL` | Local SFT MCP endpoint | `http://localhost:8000/mcp` |
-| `TEST_API_KEY`, `TEST_BASE_URL` | Evaluation-model credential and endpoint | endpoint defaults to LiteLLM |
-| `TEST_JUDGE_MODEL_GPT` | Protocol judge | `gpt-5-pro` |
-| `TEST_FAITHFULNESS_MODEL` | Faithfulness judge | `gpt-5-pro` |
-| `TEST_FAITHFULNESS_TEMPERATURE` | Faithfulness-judge temperature | `1.0` in code |
-
-`LLM_BASE_URL` is retained in `self_refine_loop_agent.py` for an OpenAI-compatible local client, but the current generation path communicates through `LLM_SERVER_URL`. The native baseline is also a legacy path: it reads `SOTA_MODEL` and `SOTA_API_KEY` but currently uses a fixed LiteLLM gateway URL.
-
-Do not commit `.env` or API credentials.
-
-## Quick start
-
-### 1. Start the local pathway service
-
-Run the service in a dedicated terminal:
-
-```bash
-cd /path/to/Agentic-Syn-RRAG
-conda activate syn-rrag-sft-server
-
-python mcp_tools/local_llm_mcp.py \
-  --model_path ./checkpoints/syn-rrag-wipo
-```
-
-The service listens on port `8000`. The inference entry points start `mcp_tools/mcp_rag.py` as a subprocess, so the retrieval tool does not require a second manually started service.
-
-### 2. Predict synthesis plans from product SMILES
-
-The bundled input is a headerless CSV of three product SMILES. These targets were confirmed in wet-lab experiments; the file is a short inference demo, not the 150-target evaluation set. Corresponding Syn-RRAG Top-10 outputs are in [`target_mols/target_mol_top10_predictions_clean.jsonl`](./target_mols/target_mol_top10_predictions_clean.jsonl).
-
-
-```bash
-conda activate agentic-syn-rrag
-
-python predict_target_mols.py \
-  -f target_mols/target_mol.csv \
-  --num_samples 10 \
-  -o target_mols/target_mol_top10_predictions.jsonl
-```
-
-For a headered CSV, pass `--smiles_column <column>`. Without that option, the script recognizes common names including `smiles`, `target_smiles`, `product_smiles`, and `s_products`. Every input SMILES is validated and canonicalized with RDKit before inference.
-
-The output contains one pretty-printed JSON object per target. A checkpoint named `<output>.checkpoint.json` is maintained during execution and removed after all targets complete successfully. If a run is interrupted, rerunning the same command resumes from the checkpoint or existing output.
-
-Optional modes:
-
-```bash
-# SFT proposal + final generation, without retrieval or reranking
-python predict_target_mols.py -f target_mols/target_mol.csv --generate_only
-
-# Structural retrieval without semantic reranking
-python predict_target_mols.py -f target_mols/target_mol.csv --simple_rag
-```
-
-`--condition_sampling` affects only local SFT reagent/solvent generation. Reactant generation remains deterministic beam search. Its sampling controls are `--condition_temperature`, `--condition_top_p`, and `--condition_top_k`.
-
-## Batch inference
-
-`run_app.py` is the benchmark and ablation entry point. Its input CSV must contain `k`, `v`, `s_products`, `s_reactants`, `s_reagents`, `s_solvents`, and a Python-literal-compatible `clean_response` field. The included `evaluate/test_150.csv` has 150 rows and the required columns.
-
-A single-process run is:
-
-```bash
-python run_app.py \
-  -f ./evaluate/test_150.csv \
-  -s ./evaluate/syn_rrag_top10/model \
-  -p ./evaluate/syn_rrag_top10/run \
-  --num_samples 10 \
-  --max_concurrency 1
-```
-
-For ten deterministic, non-overlapping shards:
-
-```bash
-RUN_ID="$(date +%Y%m%d_%H%M%S)_syn_rrag_top10"
-RUN_DIR="./evaluate/${RUN_ID}"
-OUTPUT_STEM="01_gemini25_top10"
-mkdir -p "$RUN_DIR"
-printf '%s\n' "$OUTPUT_STEM" > "$RUN_DIR/OUTPUT_STEM.txt"
-
-for sid in $(seq 0 9); do
-  SHARD_DIR="$RUN_DIR/shard_${sid}"
-  mkdir -p "$SHARD_DIR"
-  nohup python run_app.py \
-    -f ./evaluate/test_150.csv \
-    -s "$SHARD_DIR/${OUTPUT_STEM}_model" \
-    -p "$SHARD_DIR/${OUTPUT_STEM}_" \
-    --num_samples 10 \
-    --shard_id "$sid" \
-    --num_shards 10 \
-    --total_records 150 \
-    --max_concurrency 1 \
-    > "$SHARD_DIR/${OUTPUT_STEM}.log" 2>&1 &
-done
-```
-
-Do not allow two processes to write to the same output prefix. Each shard writes:
-
-- `${OUTPUT_STEM}_model.pkl`: a stream of pickled records;
-- `${OUTPUT_STEM}_model.json`: pretty-printed, concatenated JSON objects, not a JSON array;
-- `${OUTPUT_STEM}__checkpoint.json`: resumable progress, removed after that shard completes;
-- `${OUTPUT_STEM}.log`: redirected process output from the command above.
+After export, place the Hugging Face checkpoint under `checkpoints/` (for example `checkpoints/syn-rrag-wipo/`). Use it with `mcp_tools/local_llm_mcp.py` as in [Quick start](#quick-start). Released checkpoints can also be downloaded from ModelScope as in [Inference](#inference).
 
 ## Benchmark and evaluation
 
@@ -452,8 +467,6 @@ We evaluate on 150 targets randomly sampled from the product-disjoint WIPO-2M he
 | SFT Llama | Same 150 targets | Reactant accuracy: 46.0% |
 | Native Gemini-2.5-Pro | Same 150 targets | Reactant accuracy: 14.7% |
 | Full Syn-RRAG rule checks | Same 150 targets, Top-1 | Validity: 100.0%; elemental consistency: 100.0%; structural compatibility: 99.3% |
-
-These values are reported results, not recomputed during installation. Use the commands below to evaluate a completed run.
 
 ### Metric definitions
 
