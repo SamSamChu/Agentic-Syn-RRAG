@@ -27,9 +27,6 @@ Syn-RRAG implements a **Generate–Retrieve–Refine** workflow:
 2. **Retrieve** — RXNGraphormer embeds each proposed reaction, FAISS retrieves ten structurally similar patent precedents, and a re-ranking model selects the three most relevant records.
 3. **Refine** — the configured main model evaluates the proposed pathway against the retrieved evidence, refines unsupported components, and produces a validated, structured protocol.
 
-
-The ten retrieved precedents in step 2 are distinct from the final Top-10 pathway candidates produced when `--num_samples 10` is used.
-
 <p align="center">
   <img src="./images/Syn-RRAG.jpg" alt="Syn-RRAG architecture" width="760">
 </p>
@@ -73,7 +70,15 @@ The runtime supports:
 │   ├── target_mol.csv                 # Three product SMILES (wet-lab confirmed)
 │   └── target_mol_top10_predictions_clean.jsonl  # Syn-RRAG Top-10 on those targets
 ├── train_examples/                    # LLaMA-Factory patch; data_prep examples
-├── pretrained_classification_model/   # RXNGraphormer model location
+├── pretrained_classification_model/
+│   ├── parameters.json                # already in this repository
+│   └── model/                         # RXNGraphormer weights (ModelScope; not in git)
+├── data/                              # Figshare; not in git
+│   ├── offline_reaction_database.json
+│   ├── reaction_update.faiss
+│   └── indices_map_update.npy
+├── checkpoints/
+│   └── syn-rrag-wipo/                 # WIPO SFT for inference (ModelScope; not in git)
 ├── requirements_main.txt              # Main runtime environment
 ├── requirements_server.txt            # Local SFT service environment
 └── .env.example                       # Endpoint/model configuration template
@@ -170,11 +175,39 @@ conda create -n syn-rrag-train python=3.12 -y
 conda activate syn-rrag-train
 ```
 
-Then clone, patch, and `pip install` LLaMA-Factory as in [SFT training](#sft-training).
+**1. Prepare LLaMA-Factory**
 
-**Base model.** WIPO SFT starts from Unsloth Llama-3-8B-Instruct ([`unsloth/llama-3-8b-Instruct`](https://huggingface.co/unsloth/llama-3-8b-Instruct) on Hugging Face). Download a local copy and set `model_name_or_path` in `wipo_multi_task_full.yaml`. Hugging Face gated access may require `hf auth login`.
+```bash
+cd /path/to/Agentic-Syn-RRAG/train_examples
+git clone https://github.com/hiyouga/LlamaFactory.git
+cd LlamaFactory
 
-**Training and eval jsonl.** `wipo_data.zip` and `data_uspto50.zip` are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Place them under `LlamaFactory/` as:
+git fetch origin 2b27283ba0566eda9ec7ac335642807189c87e70
+git checkout 2b27283ba0566eda9ec7ac335642807189c87e70
+git apply --check ../my_changes.patch
+git apply ../my_changes.patch
+```
+
+The clone directory is `LlamaFactory`. The pinned commit is required because the patch modifies internal data loading, SFT workflow, and trainer files in addition to adding configs and evaluation utilities.
+
+**2. Install training dependencies** from the patched `LlamaFactory` directory:
+
+```bash
+conda activate syn-rrag-train
+pip install .
+pip install -r ../requirements.txt \
+  --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+**3. Base model, jsonl, and optional USPTO weights**
+
+WIPO SFT starts from Unsloth Llama-3-8B-Instruct ([`unsloth/llama-3-8b-Instruct`](https://huggingface.co/unsloth/llama-3-8b-Instruct) on Hugging Face). Download a local copy and set `model_name_or_path` in `wipo_multi_task_full.yaml`. Hugging Face gated access may require `hf auth login`. Paths in the patch are environment-specific examples and must be changed.
+
+`wipo_data.zip` and `data_uspto50.zip` are on [Figshare](https://figshare.com/s/9d568a8e2e2dcdf28925). Place them under `LlamaFactory/` as:
 
 ```text
 LlamaFactory/
@@ -190,9 +223,28 @@ LlamaFactory/
     └── test_50k_class.json
 ```
 
-**Released SFT weights (optional).** To skip WIPO training and only run USPTO, download `syn-rrag-wipo` from [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints) and point `uspto_50k_class.yaml` at that folder. For USPTO Top-k evaluation, download `syn-rrag-uspto50` from the same repo and point `eval_dual.sh` at it (for example `checkpoints/syn-rrag-uspto50/`). Retrieval assets (`data/`, RXNGraphormer) are not required for SFT training.
+Optional released USPTO SFT (for Top-k evaluation without training USPTO yourself):
 
-Then continue with the commands in [SFT training](#sft-training).
+```text
+Agentic-Syn-RRAG/checkpoints/
+└── syn-rrag-uspto50/                  # ModelScope; not in git
+```
+
+The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into `wipo_data/` and `data_uspto50/`.
+
+To skip WIPO training and only run USPTO, download `syn-rrag-wipo` from [justcoins/Syn-RRAG-Checkpoints](https://www.modelscope.cn/models/justcoins/Syn-RRAG-Checkpoints) and point `uspto_50k_class.yaml` at that folder. For USPTO Top-k evaluation, download `syn-rrag-uspto50` from the same repo into `checkpoints/syn-rrag-uspto50/` and point `eval_dual.sh` at it. Retrieval assets (`data/`, RXNGraphormer) are not required for SFT training.
+
+Patent HTML is turned into structured reaction records with [`train_examples/data_prep/demo.ipynb`](./train_examples/data_prep/demo.ipynb). Those records are then converted into SFT QA pairs (retrosynthesis, forward prediction, and condition prediction) by [`train_examples/data_prep/QA_construct_demo.py`](./train_examples/data_prep/QA_construct_demo.py).
+
+The script ships two built-in reaction records. Run it from the repository root:
+
+```bash
+python train_examples/data_prep/QA_construct_demo.py
+```
+
+It prints SFT QA jsonl to stdout. Replace the samples in the script to use your own records from `demo.ipynb`.
+
+Then run the commands in [SFT training](#sft-training).
 
 ## Quick start
 
@@ -322,59 +374,11 @@ After a 150-target run, compute metrics as in [Benchmark and evaluation](#benchm
 
 Complete the training environment, Unsloth base model, and WIPO/USPTO jsonl files in [Environment setup → Training](#training) first. If that is not done yet, start there.
 
-The steps below start in `train_examples/` after that. The training release is a patch against a fixed LLaMA-Factory revision, not a standalone trainer.
+The training release is a patch against a fixed LLaMA-Factory revision, not a standalone trainer.
 
-### 1. Prepare LLaMA-Factory
+### Run training and SFT evaluation
 
-```bash
-cd /path/to/Agentic-Syn-RRAG/train_examples
-git clone https://github.com/hiyouga/LlamaFactory.git
-cd LlamaFactory
-
-git fetch origin 2b27283ba0566eda9ec7ac335642807189c87e70
-git checkout 2b27283ba0566eda9ec7ac335642807189c87e70
-git apply --check ../my_changes.patch
-git apply ../my_changes.patch
-```
-
-The clone directory is `LlamaFactory`. The pinned commit is required because the patch modifies internal data loading, SFT workflow, and trainer files in addition to adding configs and evaluation utilities.
-
-### 2. Install training dependencies
-
-From the patched `LlamaFactory` directory, with `syn-rrag-train` active:
-
-```bash
-conda activate syn-rrag-train
-pip install .
-pip install -r ../requirements.txt \
-  --extra-index-url https://download.pytorch.org/whl/cu128
-```
-
-Verify the actual environment before launching a long run:
-
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-```
-
-### 3. Prepare model and datasets
-
-Set `model_name_or_path` in `wipo_multi_task_full.yaml` to the local Unsloth directory from [Training](#training). Paths in the patch are environment-specific examples and must be changed.
-
-Place Figshare jsonl files as shown there. The patch adds `dataset_info.json` templates under `data_wipo/` and `data_uspto50k/`; copy or link them into `wipo_data/` and `data_uspto50/`.
-
-Patent HTML is turned into structured reaction records with [`train_examples/data_prep/demo.ipynb`](./train_examples/data_prep/demo.ipynb). Those records are then converted into SFT QA pairs (retrosynthesis, forward prediction, and condition prediction) by [`train_examples/data_prep/QA_construct_demo.py`](./train_examples/data_prep/QA_construct_demo.py).
-
-The script ships two built-in reaction records. Run it from the repository root:
-
-```bash
-python train_examples/data_prep/QA_construct_demo.py
-```
-
-It prints SFT QA jsonl to stdout. Replace the samples in the script to use your own records from `demo.ipynb`.
-
-### 4. Run training and SFT evaluation
-
-Use syn-rrag-train. Commands assume `$LF_ROOT` unless noted.
+Use `syn-rrag-train`. Commands assume `$LF_ROOT` unless noted.
 
 ```bash
 export LF_ROOT=/path/to/Agentic-Syn-RRAG/train_examples/LlamaFactory
@@ -425,7 +429,7 @@ In `uspto_50k_class.yaml`, change only:
 model_name_or_path: saves/llama3-8b-full/wipo   # WIPO checkpoint from Step 1
 ```
 
-On 4 GPUs keep `gradient_accumulation_steps: 2` so the global batch stays 32. Confirm `dataset_dir: data_uspto50/` and the jsonl files from §3.
+On 4 GPUs keep `gradient_accumulation_steps: 2` so the global batch stays 32. Confirm `dataset_dir: data_uspto50/` and the jsonl files from [Training](#training).
 
 ```bash
 conda activate syn-rrag-train
