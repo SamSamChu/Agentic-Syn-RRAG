@@ -590,5 +590,3 @@ Please cite the paper and this repository when using the code, evaluation data, 
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
-
-Copyright (c) 2026 SamSamChu.
