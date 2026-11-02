@@ -295,6 +295,43 @@ def _build_validation_feedback(error: Exception, attempt_number: int) -> str:
         "For the next attempt, return a complete valid JSON recipe.\n"
     )
 
+def _content_to_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text") or ""))
+            else:
+                text = getattr(block, "text", None)
+                parts.append(text if isinstance(text, str) else "")
+        return "".join(parts)
+    return str(content or "")
+
+
+def _normalize_fenced_json(content: str):
+    pattern = r"```json\s*(\{.*?\})\s*```"
+    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+    if match:
+        return content, match
+    decoder = json.JSONDecoder()
+    start = content.find("{")
+    while start != -1:
+        try:
+            obj, end = decoder.raw_decode(content, start)
+        except json.JSONDecodeError:
+            start = content.find("{", start + 1)
+            continue
+        if isinstance(obj, dict):
+            content = content[:start] + "```json\n" + content[start:end] + "\n```" + content[end:]
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            return content, match
+        start = content.find("{", start + 1)
+    return content, None
+
 
 async def invoke_and_validate(chain, inputs:dict, config: RunnableConfig, data=None, node_type="RAG", history=None):
     validation_feedback_block = ""
@@ -323,33 +360,30 @@ async def invoke_and_validate(chain, inputs:dict, config: RunnableConfig, data=N
             
             # --- STAGE 1: JSON & Keyword Extraction ---
             # Assuming response is a string or has a 'text' attribute
-            content = response if isinstance(response, str) else response.content
+            content = _content_to_text(response if isinstance(response, str) else response.content)
             if history is not None:
                 history.append(content)
-            pattern = r"```json\s*(\{.*?\})\s*```"
-            match = re.search(pattern, content, re.DOTALL)
+            content, match = _normalize_fenced_json(content)
             parsed_data = None
             if not match:
                 raise RDKitProcessingError(inputs["products_SMILES"], "Extraction", "No JSON found", payload=response)
 
             json_str = match.group(1).strip()
             try:
-                # Step 1: Try standard JSON (strict)
                 parsed_data = json.loads(json_str)
             except Exception:
                 try:
                     parsed_data = ast.literal_eval(json_str)
                 except Exception as e:
                     raise RDKitProcessingError(inputs["products_SMILES"], "Pasing", f"Failed to parse JONS after repair: {str(e)}", payload=response)
-                #final_recipes.append(data)    
             if node_type == "RAG":
                 policy_changed = _enforce_reactant_revision_policy(parsed_data, inputs)
                 if policy_changed:
                     content = _replace_json_block(content, match, parsed_data)
-                    if isinstance(response, str):
-                        response = content
-                    else:
-                        response.content = content
+            if isinstance(response, str):
+                response = content
+            else:
+                response.content = content
             # Check for required keywords/keys
             valid, reason = extract_json_molecules(
                 parsed_data,

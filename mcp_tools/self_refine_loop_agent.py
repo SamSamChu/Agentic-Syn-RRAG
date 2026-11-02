@@ -77,10 +77,35 @@ def _canonical_smiles(smiles: str) -> str | None:
         return None
     return Chem.MolToSmiles(mol, canonical=True)
 
+def _contains_product(reactants_smiles: str, product_smiles: str) -> bool:
+    product = _canonical_smiles(product_smiles)
+    if not product:
+        return False
+    return any(
+        _canonical_smiles(part) == product
+        for part in _split_components(reactants_smiles)
+    )
 
 def _split_components(smiles: str) -> List[str]:
     return [part for part in (smiles or "").split(".") if part]
 
+def _dedupe_components(smiles: str) -> str | None:
+    unique = []
+    seen_organic = set()
+    for part in _split_components(smiles):
+        canon = _canonical_smiles(part)
+        if canon is None:
+            continue
+        mol = Chem.MolFromSmiles(canon)
+        organic = mol is not None and any(a.GetAtomicNum() == 6 for a in mol.GetAtoms())
+        if organic:
+            if canon in seen_organic:
+                continue
+            seen_organic.add(canon)
+        unique.append(canon)
+    if not unique:
+        return None
+    return ".".join(unique)
 
 def _element_counts(smiles: str) -> Counter:
     mol = Chem.MolFromSmiles(smiles or "")
@@ -214,7 +239,16 @@ async def generate_reactants_fn(state: SynthesisState):
         if canonical is None:
             failed_this_round.append(item["raw_smiles"])
             continue
-
+        if _contains_product(canonical, product_smiles):
+            failed_this_round.append(item["raw_smiles"])
+            continue        
+        if len(_split_components(canonical)) > 8:
+            failed_this_round.append(item["raw_smiles"])
+            continue
+        canonical = _dedupe_components(canonical)
+        if canonical is None:
+            failed_this_round.append(item["raw_smiles"])
+            continue        
         existing = canonical_candidates.get(canonical)
         if existing is None:
             candidate = {

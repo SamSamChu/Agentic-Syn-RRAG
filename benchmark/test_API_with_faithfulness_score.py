@@ -240,14 +240,13 @@ async def loop_llm_as_a_judge(samples, model_id, prefix="", prefix_checkpoint="t
 
                     results = await asyncio.gather(*tasks)
 
-                    # 2. SAVE RESULTS & UPDATE CHECKPOINT
-                    filename_output = f"{prefix}_litellm_chemistry_audit_faithfullness"
-                    save_audit_to_csv(results, prefix=filename_output)
-
-                    # Increment index and save progress to JSON
-                    start_idx += batch_size
-                    with open(checkpoint_file, "w") as f:
-                        json.dump({"last_index": start_idx}, f)
+            # 2. SAVE RESULTS & UPDATE CHECKPOINT
+            filename_output = f"{prefix}_litellm_chemistry_audit_faithfullness"
+            save_audit_to_csv(results, prefix=filename_output)
+            # Increment index and save progress to JSON
+            start_idx += batch_size
+            with open(checkpoint_file, "w") as f:
+                json.dump({"last_index": start_idx}, f)
 
             print(f"✅ Batch complete. Checkpoint updated to {start_idx}.")
 

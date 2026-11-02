@@ -33,13 +33,12 @@ sem = asyncio.Semaphore(5)
 litellm.set_verbose = True
 client = AsyncOpenAI(
     api_key=os.getenv("SOTA_API_KEY"),
-    base_url="https://www.litellm.org/" # 设置基础URL
+    base_url=os.getenv("SOTA_BASE_URL", "https://www.litellm.org/"),
 )
 
 # Configure API settings
 #os.environ["LITELLM_LOGGING"] = "True"  # Set to True for debugging
 model_id = os.getenv("SOTA_MODEL", "gemini-2.5-pro")
-BASE_URL = "https://www.litellm.org/"
 
 #prompt_org = #ChatPromptTemplate.from_template
 prompt_org = Template("""

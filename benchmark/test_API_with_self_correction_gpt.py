@@ -272,14 +272,13 @@ async def loop_llm_as_a_judge(samples, model_id, prefix="", prefix_checkpoint="t
 
                     results = await asyncio.gather(*tasks)
 
-                    # 2. SAVE RESULTS & UPDATE CHECKPOINT
-                    filename_output = f"{prefix}_litellm_chemistry_audit"
-                    save_audit_to_csv(results, prefix=filename_output)
-
-                    # Increment index and save progress to JSON
-                    start_idx += batch_size
-                    with open(checkpoint_file, "w") as f:
-                        json.dump({"last_index": start_idx}, f)
+            # 2. SAVE RESULTS & UPDATE CHECKPOINT
+            filename_output = f"{prefix}_litellm_chemistry_audit"
+            save_audit_to_csv(results, prefix=filename_output)
+            # Increment index and save progress to JSON
+            start_idx += batch_size
+            with open(checkpoint_file, "w") as f:
+                json.dump({"last_index": start_idx}, f)
 
             print(f"✅ Batch complete. Checkpoint updated to {start_idx}.")
 
@@ -322,6 +321,7 @@ if __name__ == "__main__":
     #loop_llm_as_a_judge(data_list)
     prefix = "top1_gpt5-pro_update"
     asyncio.run(loop_llm_as_a_judge(data_list, model_id=model_id, prefix=curr_prefix, prefix_checkpoint=curr_prefix))
+    filename_output_csv = f"{curr_prefix}_litellm_chemistry_audit.csv"
     if os.path.exists(filename_output_csv):
         score_all_samples(filename_output_csv)
     else:

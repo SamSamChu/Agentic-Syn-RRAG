@@ -127,18 +127,30 @@ def _fallback_recipe_from_local_pathway(pathway, product_smiles):
 
 
 def _extract_recipe_from_report(report):
-    pattern = r"```json\s*(\{.*?\})\s*```"
-    match = re.search(pattern, str(report or ""), re.DOTALL)
-    if not match:
-        return None
-    json_str = match.group(1).strip()
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
+    text = str(report or "")
+    fenced = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        json_str = fenced.group(1).strip()
         try:
-            return ast.literal_eval(json_str)
-        except Exception:
-            return None
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            try:
+                return ast.literal_eval(json_str)
+            except Exception:
+                return None
+
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    while start != -1:
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            start = text.find("{", start + 1)
+            continue
+        if isinstance(obj, dict):
+            return obj
+        start = text.find("{", start + 1)
+    return None
 
 
 async def main(
